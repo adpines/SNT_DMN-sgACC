@@ -1,0 +1,8 @@
+# large data files -- add/remove based on what's actually in FC/NMF/QC
+*.nii
+*.nii.gz
+*.mat
+*.h5
+__pycache__/
+*.pyc
+.DS_Store
