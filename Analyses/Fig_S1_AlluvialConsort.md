@@ -1,0 +1,226 @@
+Alluvial Consort chart
+================
+Adam
+7/25/2026
+
+``` r
+# ==============================================================================
+# CONSOLIDATED QC PIPELINE: All exclusions from doc 1 + functional data
+# ==============================================================================
+
+library(ggalluvial)
+```
+
+    ## Warning: package 'ggalluvial' was built under R version 4.5.2
+
+    ## Loading required package: ggplot2
+
+    ## Warning: package 'ggplot2' was built under R version 4.5.3
+
+``` r
+library(ggplot2)
+library(tidyr)
+library(RColorBrewer)
+library(dplyr)
+```
+
+    ## 
+    ## Attaching package: 'dplyr'
+
+    ## The following objects are masked from 'package:stats':
+    ## 
+    ##     filter, lag
+
+    ## The following objects are masked from 'package:base':
+    ## 
+    ##     intersect, setdiff, setequal, union
+
+``` r
+# Load functional connectivity data
+FCs <- read.csv('E://Downloads/AllSubjects_FC(10).csv')
+FCs <- FCs[FCs$Var1 != 's00x', ]
+
+# Create theoretical dataset: all possible subjects + sessions + scans
+includedSubjects <- data.frame(subj = sprintf("s%03d", 1:53))
+sessions <- paste0("V", 2:10)
+scan_counts <- c(4, rep(2, length(sessions) - 1))  # V2=4 scans, V3-V10=2 each
+
+df <- do.call(rbind, lapply(seq_along(sessions), function(i) {
+  expand.grid(
+    subj = includedSubjects$subj,
+    sesh = sessions[i],
+    scan = seq_len(scan_counts[i]),
+    stringsAsFactors = FALSE
+  )
+}))
+
+# Create unique key for matching across datasets
+df$key <- paste(df$subj, df$sesh, df$scan, sep = "_")
+FCs$key <- paste(FCs$Var1, paste0('V', FCs$Var2), FCs$Var3, sep = "_")
+
+# Set up subject colors
+subj_colors <- setNames(
+  colorRampPalette(RColorBrewer::brewer.pal(12, "Paired"))(53),
+  sprintf("s%03d", 1:53)
+)
+
+# ==============================================================================
+# Apply QC filters sequentially (each inherits previous exclusions)
+# ==============================================================================
+
+# Stage 1: Theoretical inclusion (starting point)
+df$TheoIncl <- 1
+
+# Stage 2: Dropout prior to randomization
+# Dropout prior to randomization
+df$DO_preRand=1
+df$DO_preRand[df$subj=='s008']=0
+df$DO_preRand[df$subj=='s013']=0
+df$DO_preRand[df$subj=='s014']=0
+df$DO_preRand[df$subj=='s037']=0
+df$DO_preRand[df$subj=='s049']=0
+
+# Stage 3: Problem with condition allocation
+df$ConditionAlloc=1
+df$ConditionAlloc[df$DO_preRand==0]=0
+df$ConditionAlloc[df$subj=='s021']=0
+
+# Stage 4: Interrupted Treatment timecourse (power outage)
+df$InterruptedTx=1
+df$InterruptedTx[df$DO_preRand==0]=0
+df$InterruptedTx[df$ConditionAlloc==0]=0
+df$InterruptedTx[df$subj=='s023']=0
+df$InterruptedTx[df$subj=='s053']=0
+
+# stage 4.5: targeting problem
+df$Successful_Target_Generation=1
+df$Successful_Target_Generation[df$InterruptedTx==0]=0
+df$Successful_Target_Generation[df$subj=='s005']=0
+
+# Stage 5: before trial initiation (all V2s)
+df$After_Trial_Initiation<-1
+df$After_Trial_Initiation[df$DO_preRand==0]=0
+df$After_Trial_Initiation[df$ConditionAlloc==0]=0
+df$After_Trial_Initiation[df$InterruptedTx==0]=0
+df$After_Trial_Initiation[df$Successful_Target_Generation==0]=0
+df$After_Trial_Initiation[df$sesh=="V2"]=0
+
+# Stage 6: After trial endpoint (all V9, V10)
+df$After_Trial_Endpoint[df$After_Trial_Initiation==1]<-1
+df$After_Trial_Endpoint[df$DO_preRand==0]=0
+df$After_Trial_Endpoint[df$ConditionAlloc==0]=0
+df$After_Trial_Endpoint[df$InterruptedTx==0]=0
+df$After_Trial_Endpoint[df$After_Trial_Initiation==0]=0
+df$After_Trial_Endpoint[df$sesh=="V9"]=0
+df$After_Trial_Endpoint[df$sesh=="V10"]=0
+
+# Stage 7: has demographics
+df$Has_Demo[df$After_Trial_Endpoint==1]<-1
+df$Has_Demo[df$After_Trial_Endpoint==0]<-0
+df$Has_Demo[df$subj=='s008']=0
+df$Has_Demo[df$subj=='s013']=0
+df$Has_Demo[df$subj=='s014']=0
+df$Has_Demo[df$subj=='s049']=0
+
+# Stage 8: has maudsley
+# add in maudsley data
+Mauds=read.csv('E:\\Downloads/Maudsley_data.csv')
+# make subject names equiv
+Mauds$Subject <- sub(".*_(s[0-9]+[a-z]?)", "\\1", Mauds$record_id)
+# remove trailing a's
+Mauds$Subject <- sub("a$", "", Mauds$Subject)
+Mauds$Subject <- gsub("\u00A0", " ", Mauds$Subject, fixed = TRUE)
+Mauds$Subject <- trimws(Mauds$Subject)
+# only need mauds value and subject
+Mauds=data.frame(cbind(Mauds$Subject,Mauds$Maudsley.Staging.Method.Score))
+colnames(Mauds)=c('Subjects','MaudScore')
+# ensure that every subject is here
+df$Has_Maudsley <- ifelse(df$subj %in% Mauds$Subject, 1, 0)
+df$Has_Maudsley[df$Has_Demo==0]<-0
+
+# Stage 9: Manual QC
+df$Manual_QC[df$Has_Maudsley==1]=1
+df$Manual_QC[df$Has_Maudsley==0]=0
+df$Manual_QC[df$key=='s016_V4_1']=0
+df$Manual_QC[df$key=='s016_V4_2']=0
+
+# Stage 10: FD QC
+BRAINS_headmotion <- read.csv('E://Downloads/fd_summary_per_scan.csv', stringsAsFactors = FALSE)
+# Clean up column names
+BRAINS_headmotion$Subject <- sub("^sub-", "", BRAINS_headmotion$Subject)
+BRAINS_headmotion$Subject <- sub("_.*$", "", BRAINS_headmotion$Subject)
+BRAINS_headmotion$Session <- sub("^ses-V", "", BRAINS_headmotion$Session)
+BRAINS_headmotion$ScanNum <- as.numeric(sub(".*Resting([0-9]+).*", "\\1", BRAINS_headmotion$Scan))
+```
+
+    ## Warning: NAs introduced by coercion
+
+``` r
+BRAINS_headmotion$key <- paste0(BRAINS_headmotion$Subject, "_V", BRAINS_headmotion$Session, "_", BRAINS_headmotion$ScanNum)
+BRAINS_headmotion <- BRAINS_headmotion[!duplicated(BRAINS_headmotion$key), ]
+# Merge FC with head motion
+FCMerged <- merge(FCs, BRAINS_headmotion, by = 'key')
+FCMerged_hm_pass <- FCMerged[FCMerged$Mean_FD <= 0.2, ]
+df$FD_QC <- ifelse(df$key %in% FCMerged_hm_pass$key, 1, 0)
+df$FD_QC[df$Manual_QC==0]=0
+
+# Stage 11: just those with resp recordings
+df$Has_Respiration[df$FD_QC==0]=0
+df$Has_Respiration[df$FD_QC==1]=1
+df$Has_Respiration[df$scan==1]=0
+
+# ==============================================================================
+# Build alluvial plot with subject coloring
+# ==============================================================================
+
+# Define QC stage order for plotting - MATCH YOUR PREAMBLE COLUMNS
+qc_stages <- c("TheoIncl", "DO_preRand", "ConditionAlloc", "InterruptedTx", "Successful_Target_Generation",
+               "After_Trial_Initiation", "After_Trial_Endpoint", "Has_Demo", 
+               "Has_Maudsley", "Manual_QC", "FD_QC","Has_Respiration")
+
+# Prepare data for alluvial - color by subject if included, grey if excluded
+alluvial_df <- df %>%
+  select(key, subj, all_of(qc_stages)) %>%
+  pivot_longer(cols = all_of(qc_stages),
+               names_to = "stage",
+               values_to = "included") %>%
+  mutate(
+    stage = factor(stage, levels = qc_stages),
+    flow_color = ifelse(included == 1, subj, "Excluded")
+  )
+
+# has demo and maudlsey is redundant
+alluvial_df=alluvial_df[alluvial_df$stage!='Has_Demo',]
+alluvial_df=alluvial_df[alluvial_df$stage!='Has_Maudsley',]
+
+# Combine subject colors with grey for excluded
+flow_colors <- c(subj_colors, "Excluded" = "grey70")
+```
+
+``` r
+# Plot with subject coloring
+ggplot(alluvial_df,
+       aes(x = stage,
+           stratum = flow_color,
+           alluvium = key,
+           fill = flow_color)) +
+  geom_stratum(alpha = 0.8) +
+  geom_flow(alpha = 0.6) +
+  geom_text(stat = "stratum",
+            aes(label = after_stat(count)),
+            size = 2) +
+  scale_fill_manual(values = flow_colors) +
+  labs(title = "QC Inclusion Flow - All Stages",
+       x = NULL,
+       y = "Number of scans",
+       fill = "Subject") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1,size=14), axis.text.y = element_text(size=14),
+        plot.title = element_text(face = "bold", size = 20),
+        legend.position = "bottom",
+        legend.key.size = unit(0.4, "cm"),
+        legend.text = element_text(size = 14)) +
+  guides(fill = guide_legend(ncol = 10))
+```
+
+![](Fig_S1_AlluvialConsort_files/figure-gfm/Fig1-1.png)<!-- -->
