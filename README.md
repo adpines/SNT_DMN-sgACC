@@ -38,3 +38,14 @@ There's a separate script to get stim site - sgACC FC: it can be found [here](ht
 
 # Analyses
 
+This section includes plotting and analyses, as they most often occur side-by-side in the code. 
+
+The first script is just plotting out an alluvial format of our consort chart. That can be found in [this markdown](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/Fig_S1_AlluvialConsort.md). For this and all other markdowns, I link to the .md file for ease-of-viewing, but the underlying .Rmd file is available in the same folder.
+
+Brain plotting for figure 1 (panels C and D) can be found in [this matlab script](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/Fig1.m). This script is very similar to that used for [figure S2](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/FigS2.m), which plots classic discrete parcellations of personalized functional networks, and very similar to that used for [figure 2](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/Fig2.m), which plots DMN-sgACC ROIs specifically.
+
+But the majority of analysis/figure making is scripted in R. The code for figure 2 stats and visualizations is within [this markdown file](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/Fig2.md).
+
+The stats and visualizations for figure 3 are available in [this markdown](https://github.com/adpines/SNT_DMN-sgACC/blob/main/Analyses/Fig3.md).
+
+Happy replicating! -AdP
