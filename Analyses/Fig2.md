@@ -378,7 +378,8 @@ FCMergedDemo$Resids=ReducedMod$residuals[,2]+mean(FCMergedDemo$DM_sgAv)
 # clarify group legend label
 FCMergedDemo$Treatment=factor(x='Active',levels=c('Active','Sham'))
 FCMergedDemo$Treatment[FCMergedDemo$Group=='Y']='Sham'
-ggplot(FCMergedDemo,aes(x=DaysSinceInit,y=Resids,Group=Treatment,color=Treatment))+geom_point(alpha=.7,size=3)+geom_smooth(method='lm')+theme_minimal(base_size = 46)+ylab('DMN-sgACC FC')+xlab('Days of Treatment')+scale_color_manual(values=c('#8ac926','#ffca3a'))
+# saved at 2100 x 1600
+ggplot(FCMergedDemo,aes(x=DaysSinceInit,y=Resids,Group=Treatment,color=Treatment))+geom_point(alpha=.7,size=5)+geom_smooth(method='lm')+theme_minimal(base_size = 52)+ylab('DMN-sgACC FC')+xlab('Days of Treatment')+scale_color_manual(values=c('#8ac926','#ffca3a'))
 ```
 
     ## `geom_smooth()` using formula = 'y ~ x'
@@ -426,6 +427,109 @@ print(summary(Dif_TRx))
     ## 
     ## Number of Observations: 425
     ## Number of Groups: 40
+
+``` r
+### other covs for supplementary plot
+# sex
+ggplot(FCMergedDemo,aes(x=Gender,y=DM_sgAv))+geom_boxplot()+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Sex')
+```
+
+![](Fig2_files/figure-gfm/Fig1-2.png)<!-- -->
+
+``` r
+# FD
+ggplot(FCMergedDemo,aes(x=Mean_FD,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Framewise Displacement')
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](Fig2_files/figure-gfm/Fig1-3.png)<!-- -->
+
+``` r
+# Age
+ggplot(FCMergedDemo,aes(x=Age.at.screening.consent,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Age (Years)')
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](Fig2_files/figure-gfm/Fig1-4.png)<!-- -->
+
+``` r
+# Maudsley
+ggplot(FCMergedDemo,aes(x=Maudsley.Staging.Method.Score,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Maudsley Staging Method Score')
+```
+
+    ## `geom_smooth()` using formula = 'y ~ x'
+
+![](Fig2_files/figure-gfm/Fig1-5.png)<!-- -->
+
+``` r
+# random interepts: requires subject colors, specified as follows:
+subj_colors <- setNames(
+  colorRampPalette(RColorBrewer::brewer.pal(12, "Paired"))(53),
+  sprintf("s%03d", 1:53)
+)
+# primary model
+Dif_TRx<-lme(DM_sgAv ~Gender+Mean_FD+DaysSinceInit*Group+Age.at.screening.consent+Maudsley.Staging.Method.Score, random = ~ 1 | Subject, data = FCMergedDemo)
+ranef_df <- data.frame(
+  Subject = rownames(ranef(Dif_TRx)),
+  RandomIntercept = ranef(Dif_TRx)[, 1]
+)
+
+ranef_df$Subject <- as.character(ranef_df$Subject)
+# Order subjects by random intercept
+ranef_df <- data.frame(
+  Subject = rownames(ranef(Dif_TRx)),
+  RandomIntercept = ranef(Dif_TRx)[, 1],
+  row.names = NULL
+)
+
+# Maintain original subject ordering
+ranef_df$Subject <- factor(
+  ranef_df$Subject,
+  levels = sprintf("s%03d", 1:53)
+)
+
+ggplot(ranef_df,
+       aes(
+         x = Subject,
+         y = RandomIntercept,
+         color = Subject
+       )) +
+  geom_hline(
+    yintercept = 0,
+    color = "grey70",
+    linewidth = 0.8
+  ) +
+  geom_point(size = 5) +
+  scale_color_manual(
+    values = subj_colors,
+    drop = FALSE
+  ) +
+  labs(
+    title = "Subject-specific random intercepts",
+    x = NULL,
+    y = "DMN-sgACC FC"
+  ) +
+  theme_minimal(base_size=35) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 35
+    ),
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1,
+      vjust = 0.5,
+      size = 30
+    ),
+    axis.text.y = element_text(size = 35),
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+```
+
+![](Fig2_files/figure-gfm/Fig1-6.png)<!-- -->
 
 ``` r
 ### secondary hypotheses
@@ -1023,6 +1127,721 @@ print(summary(mod_fc_next_from_cr)$coefficients)
     ## (Intercept)  0.02232497 0.11428332  15.29882  0.1953476 0.8476916
     ## fc_t_z       0.03600410 0.07898867 160.06677  0.4558134 0.6491419
     ## cr_t_z      -0.04624190 0.08337334 139.58482 -0.5546366 0.5800309
+
+``` r
+# avoid scale to isolate within-person effects
+# ---- 1. Collapse FC to one value per subject per session ----
+
+FC_persession <- aggregate(
+    DM_sgAv ~ Subject + Key_Sess + Group,
+    data = FCMergedDemo,
+    FUN = mean
+)
+
+
+FC_persession$SessNum <- as.numeric(
+    sub(".*_V", "", FC_persession$Key_Sess)
+)
+
+
+# ---- Function to create TRUE consecutive-day lag pairs ----
+# Also creates within-person centered predictors.
+
+make_lag_pairs <- function(d, symptom_var) {
+
+    d <- d[, c(
+        "Subject",
+        "Group",
+        "SessNum",
+        "DM_sgAv",
+        symptom_var
+    )]
+
+    names(d)[names(d) == symptom_var] <- "Symptom"
+
+    d <- d[!is.na(d$DM_sgAv) & !is.na(d$Symptom), ]
+
+    d <- d[order(d$Subject, d$SessNum), ]
+
+    # Person means
+    d$FC_mean <- ave(
+        d$DM_sgAv,
+        d$Subject,
+        FUN = mean
+    )
+
+    d$Symptom_mean <- ave(
+        d$Symptom,
+        d$Subject,
+        FUN = mean
+    )
+
+    # Create next-day values
+    d$FC_t1 <- ave(
+        d$DM_sgAv,
+        d$Subject,
+        FUN = function(x) c(x[-1], NA)
+    )
+
+    d$Symptom_t1 <- ave(
+        d$Symptom,
+        d$Subject,
+        FUN = function(x) c(x[-1], NA)
+    )
+
+    d$Sess_t1 <- ave(
+        d$SessNum,
+        d$Subject,
+        FUN = function(x) c(x[-1], NA)
+    )
+
+    # Keep ONLY true consecutive sessions
+    d <- d[
+    !is.na(d$Sess_t1) &
+    d$Sess_t1 == d$SessNum + 1,
+    ]
+
+    # Rename current-day variables
+    d$FC_t <- d$DM_sgAv
+    d$Symptom_t <- d$Symptom
+
+    # Within-person predictors
+    d$FC_t_within <-
+        d$FC_t - d$FC_mean
+
+    d$Symptom_t_within <-
+        d$Symptom_t - d$Symptom_mean
+
+    d
+}
+
+# ---- 2A. MADRS-SR ----
+
+FC_SR <- merge(
+    FC_persession,
+    MADRSInfo[, c(
+        "Subject",
+        "Key_Sess",
+        "madrs_s_total"
+    )],
+    by = c("Subject", "Key_Sess")
+)
+
+lagged_FC_SR <- make_lag_pairs(
+    FC_SR,
+    "madrs_s_total"
+)
+
+
+# ---- 2B. IMS ----
+
+FC_IMS <- merge(
+    FC_persession,
+    IMS[, c(
+        "Subject",
+        "Key_Sess",
+        "ims12_totalscore"
+    )],
+    by = c("Subject", "Key_Sess")
+)
+
+lagged_FC_IMS <- make_lag_pairs(
+    FC_IMS,
+    "ims12_totalscore"
+)
+
+# ---- 2C. MADRS-CR ----
+
+MADRSInfo_CR <- read.csv(
+    'E:/Downloads/madrs_data_for_brains/brains_madrs-cr.csv'
+)
+
+MADRSInfo_CR$sesh <-
+    tp_map1[MADRSInfo_CR$redcap_event_name]
+
+MADRSInfo_CR$Subject <-
+    sub(
+        ".*_(s[0-9]+[a-z]?)",
+        "\\1",
+        MADRSInfo_CR$record_id
+    )
+
+MADRSInfo_CR$Subject <-
+    sub("a$", "", MADRSInfo_CR$Subject)
+
+MADRSInfo_CR$Key_Sess <-
+    paste(
+        MADRSInfo_CR$Subject,
+        MADRSInfo_CR$sesh,
+        sep = "_"
+    )
+
+FC_CR <- merge(
+    FC_persession,
+    MADRSInfo_CR[, c(
+        "Subject",
+        "Key_Sess",
+        "madrs_total_mentorrater"
+    )],
+    by = c("Subject", "Key_Sess")
+)
+
+lagged_FC_CR <- make_lag_pairs(
+    FC_CR,
+    "madrs_total_mentorrater"
+)
+
+
+# ---- 3A. MADRS-SR CROSS-LAGGED MODELS ----
+
+lagged_FC_SR$Subject <-
+    factor(lagged_FC_SR$Subject)
+
+# FC(t) -> MADRS-SR(t+1)
+mod_sr_next_from_fc <- lmer(
+    Symptom_t1 ~
+        Symptom_t_within +
+        FC_t_within +
+        (1 | Subject),
+    data = lagged_FC_SR,
+    REML = FALSE
+)
+
+# MADRS-SR(t) -> FC(t+1)
+mod_fc_next_from_sr <- lmer(
+    FC_t1 ~
+        FC_t_within +
+        Symptom_t_within +
+        (1 | Subject),
+    data = lagged_FC_SR,
+    REML = FALSE
+)
+
+cat("\n=== FC(t) -> MADRS-SR(t+1) ===\n")
+```
+
+    ## 
+    ## === FC(t) -> MADRS-SR(t+1) ===
+
+``` r
+print(summary(mod_sr_next_from_fc)$coefficients)
+```
+
+    ##                   Estimate Std. Error        df   t value     Pr(>|t|)
+    ## (Intercept)      9.1728762 0.67114626  38.97863 13.667477 1.884365e-16
+    ## Symptom_t_within 0.3708048 0.05146242 136.34678  7.205350 3.573254e-11
+    ## FC_t_within      9.6204694 7.45365304 137.43172  1.290705 1.989730e-01
+
+``` r
+cat("\n=== MADRS-SR(t) -> FC(t+1) ===\n")
+```
+
+    ## 
+    ## === MADRS-SR(t) -> FC(t+1) ===
+
+``` r
+print(summary(mod_fc_next_from_sr)$coefficients)
+```
+
+    ##                       Estimate   Std. Error        df   t value     Pr(>|t|)
+    ## (Intercept)       0.0262011063 0.0033102557  36.22593  7.915131 2.059138e-09
+    ## FC_t_within      -0.2735977467 0.0852001268 139.41381 -3.211236 1.641082e-03
+    ## Symptom_t_within  0.0009398096 0.0005923236 135.53342  1.586649 1.149225e-01
+
+``` r
+# ---- 3B. IMS CROSS-LAGGED MODELS ----
+
+lagged_FC_IMS$Subject <-
+    factor(lagged_FC_IMS$Subject)
+
+# FC(t) -> IMS(t+1)
+mod_ims_next_from_fc <- lmer(
+    Symptom_t1 ~
+        Symptom_t_within +
+        FC_t_within +
+        (1 | Subject),
+    data = lagged_FC_IMS,
+    REML = FALSE
+)
+
+# IMS(t) -> FC(t+1)
+mod_fc_next_from_ims <- lmer(
+    FC_t1 ~
+        FC_t_within +
+        Symptom_t_within +
+        (1 | Subject),
+    data = lagged_FC_IMS,
+    REML = FALSE
+)
+
+cat("\n=== FC(t) -> IMS(t+1) ===\n")
+```
+
+    ## 
+    ## === FC(t) -> IMS(t+1) ===
+
+``` r
+print(summary(mod_ims_next_from_fc)$coefficients)
+```
+
+    ##                     Estimate  Std. Error        df   t value     Pr(>|t|)
+    ## (Intercept)       45.2412520  1.83082894  39.74605 24.710802 9.758489e-26
+    ## Symptom_t_within   0.4576444  0.05569805 137.51909  8.216525 1.381535e-13
+    ## FC_t_within      -93.3689852 23.62597695 138.56274 -3.951963 1.230079e-04
+
+``` r
+cat("\n=== IMS(t) -> FC(t+1) ===\n")
+```
+
+    ## 
+    ## === IMS(t) -> FC(t+1) ===
+
+``` r
+print(summary(mod_fc_next_from_ims)$coefficients)
+```
+
+    ##                       Estimate   Std. Error       df    t value     Pr(>|t|)
+    ## (Intercept)       0.0264005687 0.0033184607  36.2025  7.9556672 1.836176e-09
+    ## FC_t_within      -0.2496041177 0.0844641421 139.1421 -2.9551489 3.671407e-03
+    ## Symptom_t_within -0.0001132776 0.0001999816 136.6136 -0.5664401 5.720240e-01
+
+``` r
+# ---- 3C. MADRS-CR CROSS-LAGGED MODELS ----
+
+lagged_FC_CR$Subject <-
+    factor(lagged_FC_CR$Subject)
+
+# FC(t) -> MADRS-CR(t+1)
+mod_cr_next_from_fc <- lmer(
+    Symptom_t1 ~
+        Symptom_t_within +
+        FC_t_within +
+        (1 | Subject),
+    data = lagged_FC_CR,
+    REML = FALSE
+)
+
+# MADRS-CR(t) -> FC(t+1)
+mod_fc_next_from_cr <- lmer(
+    FC_t1 ~
+        FC_t_within +
+        Symptom_t_within +
+        (1 | Subject),
+    data = lagged_FC_CR,
+    REML = FALSE
+)
+
+cat("\n=== FC(t) -> MADRS-CR(t+1) ===\n")
+```
+
+    ## 
+    ## === FC(t) -> MADRS-CR(t+1) ===
+
+``` r
+print(summary(mod_cr_next_from_fc)$coefficients)
+```
+
+    ##                    Estimate  Std. Error        df   t value     Pr(>|t|)
+    ## (Intercept)      15.7346958  1.48219362  35.30841 10.615817 1.558258e-12
+    ## Symptom_t_within  0.4157767  0.05389657 123.80401  7.714344 3.467748e-12
+    ## FC_t_within      20.5261324 15.78845870 124.45307  1.300072 1.959789e-01
+
+``` r
+cat("\n=== MADRS-CR(t) -> FC(t+1) ===\n")
+```
+
+    ## 
+    ## === MADRS-CR(t) -> FC(t+1) ===
+
+``` r
+print(summary(mod_fc_next_from_cr)$coefficients)
+```
+
+    ##                       Estimate   Std. Error       df   t value     Pr(>|t|)
+    ## (Intercept)       0.0263195498 0.0036101560  32.0653  7.290419 2.723049e-08
+    ## FC_t_within      -0.2794232655 0.0884783788 124.9524 -3.158097 1.991397e-03
+    ## Symptom_t_within  0.0003271582 0.0003033525 122.7400  1.078475 2.829367e-01
+
+``` r
+############################################################
+# TIME SERIES: FC AND IMS12 FOR EACH PARTICIPANT
+############################################################
+
+# Make sure data are sorted
+FC_IMS <- FC_IMS[
+    order(FC_IMS$Subject, FC_IMS$SessNum),
+]
+
+FC_IMS$ims12_totalscore=-FC_IMS$ims12_totalscore
+
+# Get participant IDs, just active for now
+PTs <- unique(FC_IMS$Subject[FC_IMS$Group=='X'])
+
+############################################################
+# GROUP-LEVEL TIME SERIES: FC AND IMS12
+# Active group only
+############################################################
+
+
+
+### plot z score
+
+# Active group only
+d <- FC_IMS[FC_IMS$Group == "X", ]
+
+# Reverse IMS direction
+d$ims12_totalscore <- -d$ims12_totalscore
+
+# Sort
+d <- d[order(d$Subject, d$SessNum), ]
+
+
+############################################################
+# WITHIN-SUBJECT Z-SCORES
+############################################################
+
+# FC within-person z
+d$FC_within_z <- ave(
+    d$DM_sgAv,
+    d$Subject,
+    FUN = function(x) {
+        (x - mean(x, na.rm = TRUE)) /
+            sd(x, na.rm = TRUE)
+    }
+)
+
+# IMS12 within-person z
+d$IMS_within_z <- ave(
+    d$ims12_totalscore,
+    d$Subject,
+    FUN = function(x) {
+        (x - mean(x, na.rm = TRUE)) /
+            sd(x, na.rm = TRUE)
+    }
+)
+
+
+############################################################
+# GROUP MEAN OF WITHIN-SUBJECT Z-SCORES
+############################################################
+
+group_ts <- aggregate(
+    cbind(FC_within_z, IMS_within_z) ~ SessNum,
+    data = d,
+    FUN = mean,
+    na.rm = TRUE
+)
+
+group_ts <- group_ts[
+    order(group_ts$SessNum),
+]
+
+
+
+# Range of the two within-subject z-scores
+fc_range <- range(group_ts$FC_within_z, na.rm = TRUE)
+ims_range <- range(group_ts$IMS_within_z, na.rm = TRUE)
+
+# Transform IMS z-score onto FC plotting scale
+ims_scale <- function(x) {
+    (x - ims_range[1]) /
+        diff(ims_range) *
+        diff(fc_range) +
+        fc_range[1]
+}
+
+# Inverse transformation for right-hand axis
+ims_inverse <- function(x) {
+    (x - fc_range[1]) /
+        diff(fc_range) *
+        diff(ims_range) +
+        ims_range[1]
+}
+
+# Create plotting version of IMS
+group_ts$IMS_plot <- ims_scale(group_ts$IMS_within_z)
+
+############################################################
+# SHARED HLINES BASED ON FULL PLOT RANGE
+############################################################
+
+plot_min <- min(
+    group_ts$FC_within_z,
+    na.rm = TRUE
+)
+
+plot_max <- max(
+    group_ts$FC_within_z,
+    na.rm = TRUE
+)
+
+hline_33  <- plot_max - 0.333 * (plot_max - plot_min)
+hline_66  <- plot_max - 0.666 * (plot_max - plot_min)
+hline_100 <- plot_min
+
+############################################################
+# PLOT saved at 1250 1350
+############################################################
+
+ggplot(
+    group_ts,
+    aes(x = SessNum-3)
+) +
+
+    # FC
+    geom_line(
+        aes(y = FC_within_z),
+        color = "#f57e31",
+        linewidth = 5
+    ) +
+
+    geom_point(
+        aes(y = FC_within_z),
+        color = "#233d4c",
+        size = 12
+    ) +
+
+    # IMS12
+    geom_line(
+        aes(y = IMS_plot),
+        color = "#b739b7",
+        linewidth = 5
+    ) +
+
+    geom_point(
+        aes(y = IMS_plot),
+        color = "#b739b7",
+        size = 12
+    ) +
+
+# ---- Shared reference lines ----
+geom_hline(
+    yintercept = hline_33,
+    color = "grey40",
+    linetype = "dotted",
+    linewidth = 2,
+) +
+
+geom_hline(
+    yintercept = hline_66,
+    color = "grey40",
+    linetype = "dashed",
+    linewidth = 2,
+) +
+
+geom_hline(
+    yintercept = hline_100,
+    color = "grey30",
+    linetype = "solid",
+    linewidth = 2,
+) +
+    scale_y_continuous(
+        name = "DMN-sgACC FC (z)",
+        sec.axis = sec_axis(
+            ~ ims_inverse(.),
+            name = "Symptoms (IMS, z)"
+        )
+    ) +
+
+    scale_x_continuous(
+        breaks = sort(unique(group_ts$SessNum-3))
+    ) +
+
+    labs(
+       # title = "Active Group: Within-Subject FC and IMS12 Over Time",
+        x = "Days of treatment \n (Active Arm)"
+    ) +
+
+    theme_minimal(base_size = 52)
+```
+
+![](Fig2_files/figure-gfm/unnamed-chunk-13-1.png)<!-- -->
+
+``` r
+######### SHAM
+############################################################
+# SHAM GROUP: WITHIN-SUBJECT FC + IMS12 OVER TIME
+############################################################
+
+# Sham group only
+d <- FC_IMS[FC_IMS$Group == "Y", ]
+
+# Reverse IMS direction
+d$ims12_totalscore <- -d$ims12_totalscore
+
+
+############################################################
+# WITHIN-SUBJECT Z-SCORES
+############################################################
+
+d$FC_within_z <- ave(
+    d$DM_sgAv,
+    d$Subject,
+    FUN = function(x) {
+        (x - mean(x, na.rm = TRUE)) /
+            sd(x, na.rm = TRUE)
+    }
+)
+
+d$IMS_within_z <- ave(
+    d$ims12_totalscore,
+    d$Subject,
+    FUN = function(x) {
+        (x - mean(x, na.rm = TRUE)) /
+            sd(x, na.rm = TRUE)
+    }
+)
+
+
+############################################################
+# GROUP MEAN OF WITHIN-SUBJECT Z-SCORES
+############################################################
+
+group_ts <- aggregate(
+    cbind(FC_within_z, IMS_within_z) ~ SessNum,
+    data = d,
+    FUN = mean,
+    na.rm = TRUE
+)
+
+group_ts <- group_ts[
+    order(group_ts$SessNum),
+]
+
+
+############################################################
+# PUT IMS ON SECONDARY AXIS
+############################################################
+
+fc_range <- range(
+    group_ts$FC_within_z,
+    na.rm = TRUE
+)
+
+ims_range <- range(
+    group_ts$IMS_within_z,
+    na.rm = TRUE
+)
+
+ims_scale <- function(x) {
+    (x - ims_range[1]) /
+        diff(ims_range) *
+        diff(fc_range) +
+        fc_range[1]
+}
+
+ims_inverse <- function(x) {
+    (x - fc_range[1]) /
+        diff(fc_range) *
+        diff(ims_range) +
+        ims_range[1]
+}
+
+group_ts$IMS_plot <- ims_scale(
+    group_ts$IMS_within_z
+)
+
+
+
+############################################################
+# SHARED HLINES BASED ON FULL PLOT RANGE
+############################################################
+
+plot_min <- min(
+    group_ts$FC_within_z,
+    na.rm = TRUE
+)
+
+plot_max <- max(
+    group_ts$FC_within_z,
+    na.rm = TRUE
+)
+
+hline_33  <- plot_max - 0.333 * (plot_max - plot_min)
+hline_66  <- plot_max - 0.666 * (plot_max - plot_min)
+hline_100 <- plot_min
+
+
+############################################################
+# PLOT
+############################################################
+
+ggplot(
+    group_ts,
+    aes(x = SessNum)
+) +
+
+    # FC
+    geom_line(
+        aes(y = FC_within_z),
+        color = "#f57e31",
+        linewidth = 5
+    ) +
+
+    geom_point(
+        aes(y = FC_within_z),
+        color = "#233d4c",
+        size = 12
+    ) +
+
+    # IMS12
+    geom_line(
+        aes(y = IMS_plot),
+        color = "#b739b7",
+        linewidth = 5
+    ) +
+
+    geom_point(
+        aes(y = IMS_plot),
+        color = "#b739b7",
+        size = 12
+    ) +
+    # ---- Shared reference lines ----
+    geom_hline(
+        yintercept = hline_33,
+        color = "grey40",
+        linetype = "dotted",
+        linewidth = 2,
+        alpha = 1
+    ) +
+
+    geom_hline(
+        yintercept = hline_66,
+        color = "grey40",
+        linetype = "dashed",
+        linewidth = 2,
+        alpha = 1
+    ) +
+
+    geom_hline(
+        yintercept = hline_100,
+        color = "grey30",
+        linetype = "solid",
+        linewidth = 2,
+        alpha = 1
+    ) +
+
+    scale_y_continuous(
+        name = "FC — within-subject z-score",
+        sec.axis = sec_axis(
+            ~ ims_inverse(.),
+            name = "IMS12 — within-subject z-score"
+        )
+    ) +
+
+    scale_x_continuous(
+        breaks = sort(unique(group_ts$SessNum))
+    ) +
+
+    labs(
+        #title = "Sham Group: Within-Subject FC and IMS12 Over Time",
+        x = "Days of treatment \n (Sham Arm)"
+    ) +
+
+    theme_minimal(base_size = 52)
+```
+
+![](Fig2_files/figure-gfm/unnamed-chunk-13-2.png)<!-- -->
 
 ``` r
 # plot SR with burst breathers annotated. Repeating same exact code for each symptom measure, but adding in burst breathers
