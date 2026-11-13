@@ -6,9 +6,11 @@ date: "2026-06-21"
 
 ```{r}
 library(nlme)
+library(lme4)
 library(ggplot2)
 library(tidyr)
 library(dplyr)
+
 #################
 # load in FC's, apply exclusions
 #################
@@ -63,6 +65,7 @@ df$MissFmaps <- ifelse(df$key %in% FCs$key, 1, 0)
 # s005 should be omitted entirely, references in email from Ian Kratter 8/4/2025 at 3:01 PM
 FCs=FCs[FCs$Var1!="s005",]
 # s020 for head motion, 8/4/2025 at 3:01 PM
+# temporary comment out to look at FD pre-qc
 FCs=FCs[FCs$Var1!="s020",]
 # s021 for condition allocation, 8/4/2025 at 3:01 PM
 FCs=FCs[FCs$Var1!="s021",]
@@ -124,6 +127,8 @@ hist(FCMerged$Num_Under_0.3,breaks=30)
 hist(FCMerged$Mean_FD,breaks=30)
 # Automated QC criteria is mean FD < 0.2. Note manual QC alreayd applied.
 print(dim(FCMerged))
+# save version for comparison of FD by treatment arm, response, and days
+FCMerged_unQCd=FCMerged
 FCMerged=FCMerged[FCMerged$Mean_FD<=.2,]
 print(dim(FCMerged))
 ```
@@ -132,9 +137,6 @@ print(dim(FCMerged))
 library(ggplot2)
 library(reshape2)
 library(ggalluvial)
-# record for alluvial DF
-df$FD_QC <- ifelse(df$key %in% FCMerged$key, 1, 0)
-
 #### now read in demographics
 demo=read.csv('E:\\Downloads/Demo_All_TP_Long.csv')
 # make subject names equiv
@@ -148,9 +150,9 @@ demo$Subject <- trimws(demo$Subject)
 
 # merge with FC
 FCMergedDemo=merge(FCMerged,demo,by='Subject')
+# unqced version for comparison
+FCMergedDemo_unqcd=merge(FCMerged_unQCd,demo,by='Subject')
 
-# s008, s013, s014, s049 not in demographics file. Note they were missing most scans.
-df$HasDemo <- ifelse(df$key %in% FCMergedDemo$key, 1, 0)
 
 # add in maudsley data
 Mauds=read.csv('E:\\Downloads/Maudsley_data.csv')
@@ -163,162 +165,433 @@ Mauds$Subject <- trimws(Mauds$Subject)
 # only need mauds value and subject
 Mauds=data.frame(cbind(Mauds$Subject,Mauds$Maudsley.Staging.Method.Score))
 colnames(Mauds)=c('Subjects','MaudScore')
-# ensure that every subject is here
-df$HasMaud <- ifelse(df$subj %in% Mauds$Subject, 1, 0)
-
-
-
-# first alluvial: pre self-reported
-df$TheoIncl       <- factor(df$TheoIncl, levels=c(1,0))
-df$CompletedScans <- factor(df$CompletedScans, levels=c(1,0))
-#df$StructQC       <- factor(df$StructQC, levels=c(1,0))
-df$InFCs          <- factor(df$InFCs, levels=c(1,0))
-df$FD_QC          <- factor(df$FD_QC, levels=c(1,0))
-df$FuncQC <- factor(df$FuncQC, levels=c(1,0))
-df$MissFmaps <- factor(df$MissFmaps, levels=c(1,0))
-df$HasDemo <- factor(df$HasDemo, levels=c(1,0))
-df$PassIK_Excludes <- factor(df$PassIK_Excludes, levels=c(1,0))
-df$HasMaud <- factor(df$HasMaud, levels=c(1,0))
-
-# Melt into long form for ggalluvial
-df_long <- melt(df,
-  id.vars = c("key","subj"),
-  measure.vars = c("TheoIncl","CompletedScans","InFCs","FuncQC","MissFmaps","PassIK_Excludes","FD_QC","HasDemo","HasMaud"),
-  variable.name = "Stage",
-  value.name = "Status"
-)
-
-# order stages in sequence 
-df_long$Stage <- factor(df_long$Stage,
-                        levels = c("TheoIncl","CompletedScans","StructQC", "InFCs","FuncQC","MissFmaps","PassIK_Excludes","FD_QC","HasDemo","HasMaud"),
-                        labels = c("AllPossibleScans/Subjects",
-                                   "PT Completed Scans",
-                                   "Passed Struct QC",
-                                   "Missing Scans",
-                                   "Functional QC",
-                                   "MissingFieldmaps","PassIK_Excludes",
-                                   "FD QC","Has_Demographics","HasMaud"))
-
-
-# Full plotting outsourced to separate alluvial r markdown
-#ggplot(df_long, aes(x = Stage, stratum = Status, alluvium = key, fill = subj, label = subj)) +
-#  geom_flow(stat = "alluvium",aes.flow = "backward", alpha = 0.6) +
-#  geom_stratum() +
-#  theme_minimal() +
-#  labs(title="QC Inclusion Flow",
-#       y="Number of scans")# +
-  #scale_fill_manual(values=c("1"="steelblue","0"="gray70"))
 ```
+
 
 ```{r Fig1, echo=TRUE, fig.height=15,fig.width=18}
 # leaves us with a nice FCMerged for analyses independent of SR
-colnames(FCMergedDemo)[3:29]=c('subj', 'sesh', 'scan', 'DM_sgAv', 'DM_DMAv', 'DM_FPLAv', 'DM_FPRAv', 'avg_sd', 'avg_kurt', 'bwAv', 'nGSC', 'sgSD', 'sgKurt', 'sgBw', 'sgSC', 'dmSD', 'dmKurt', 'dmBw', 'dmSC', 'slSD', 'slKurt', 'slBw', 'slSC', 'fpSD', 'fpKurt', 'fpBw', 'fpSC')
+colnames(FCMergedDemo)[3:6]=c('subj', 'sesh', 'scan', 'DM_sgAv')
 
+# same for uncqc'd
+colnames(FCMergedDemo_unqcd)[3:6]=c('subj', 'sesh', 'scan', 'DM_sgAv')
 
-#### hypothesis 1
 # analyses of treatment effects, irrespective of SR
 FCMergedDemo$DaysSinceInit=as.numeric(FCMergedDemo$ses)-3
+FCMergedDemo_unqcd$DaysSinceInit=as.numeric(FCMergedDemo_unqcd$ses)-3
 # remove target sesssion
 FCMergedDemo=FCMergedDemo[FCMergedDemo$DaysSinceInit>=0,]
+FCMergedDemo_unqcd=FCMergedDemo_unqcd[FCMergedDemo_unqcd$DaysSinceInit>=0,]
 # set sham group as reference for interpretability 
 FCMergedDemo$Group<-as.factor(FCMergedDemo$Group)
 FCMergedDemo$Group=relevel(FCMergedDemo$Group,ref='Y')
+FCMergedDemo_unqcd$Group<-as.factor(FCMergedDemo_unqcd$Group)
+FCMergedDemo_unqcd$Group=relevel(FCMergedDemo_unqcd$Group,ref='Y')
 # clin trials hypo only concerns V3-V8, remove V9 and V10
 FCMergedDemo=FCMergedDemo[as.numeric(FCMergedDemo$Session)<9,]
+FCMergedDemo_unqcd=FCMergedDemo_unqcd[as.numeric(FCMergedDemo_unqcd$Session)<9,]
 
-Dif_TRx<-lme(DM_sgAv ~Gender+Mean_FD+DaysSinceInit*Group+Age.at.screening.consent+Maudsley.Staging.Method.Score, random = ~ 1 | Subject, data = FCMergedDemo)
-summary(Dif_TRx)
+# average FD per day for equivalent FCMergedDemo_unqcd in unqc'd df
+  FCMergedDemo_unqcd_daily <- FCMergedDemo_unqcd %>%
+  group_by(Subject, Group, Session) %>%
+  summarise(Mean_FD = mean(Mean_FD, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = Session, 
+              values_from = Mean_FD,
+              names_prefix = "V")
 
-# accounting for unequal variances between groups produces similar result
-Dif_TRx <- lme(DM_sgAv ~ Gender + Mean_FD + DaysSinceInit*Group + 
-               Age.at.screening.consent + Maudsley.Staging.Method.Score,
-               random = list(Subject = pdDiag(~ Group - 1)), 
-               data = FCMergedDemo)
+FCMergedDemo_unqcd_daily<-melt(FCMergedDemo_unqcd_daily,id.vars = c('Subject','Group'))
+# as numeric it
+FCMergedDemo_unqcd_daily$day=as.numeric(gsub('V','',FCMergedDemo_unqcd_daily$variable))
+FCMergedDemo_unqcd_daily=FCMergedDemo_unqcd_daily[!is.na(FCMergedDemo_unqcd_daily$value),]
+FCMergedDemo_unqcd_daily$Subject<-as.factor(FCMergedDemo_unqcd_daily$Subject)
+# does mean FD vary by day?
+meanFDbyday=lme(value~day, random = ~ 1 | Subject, data=FCMergedDemo_unqcd_daily)
+print(summary(meanFDbyday))
+# plot for figure S3
+ReducedMod<-lme(value~1, random = ~ 1 | Subject, data=FCMergedDemo_unqcd_daily)
+FCMergedDemo_unqcd_daily$Resids=ReducedMod$residuals[,2]+mean(FCMergedDemo_unqcd_daily$value)
+# saved at 1300 x 1000
+ggplot(FCMergedDemo_unqcd_daily,aes(x=day-3,y=value))+geom_point(alpha=.7,size=6)+geom_smooth(method='lm')+theme_minimal(base_size = 52)+ylab('Mean F.D.')+xlab('Days of Treatment')
+# annoying but thoroughness-oriented check for same effect, by group
+meanFDbyday_gr=lme(value~day*Group, random = ~ 1 | Subject, data=FCMergedDemo_unqcd_daily)
+print(summary(meanFDbyday_gr))
+# saved at 1700 x 1000 
+ggplot(FCMergedDemo_unqcd_daily,aes(x = day - 3, y = value, color = Group)) +
+  geom_point(alpha = 0.7, size = 6) +
+  geom_smooth(method = "lm") +
+  theme_minimal(base_size = 52) +
+  ylab("Mean F.D.") + xlab("Days of Treatment")+scale_color_manual(labels=c('Sham','Active'),values=c('#ffca3a','#8ac926'))+labs(color='Group')
 
-summary(Dif_TRx)
 
+
+
+# evaluate if there's difference in FD by group
+a_uncqd=FCMergedDemo_unqcd_daily[FCMergedDemo_unqcd_daily$Group=='X',]
+s_uncqd=FCMergedDemo_unqcd_daily[FCMergedDemo_unqcd_daily$Group=='Y',]
+# formal model
+meanFDbygroup=lme(value~Group, random = ~ 1 | Subject, data=FCMergedDemo_unqcd_daily)
+print(summary(meanFDbygroup))
+# clarify group legend label
+FCMergedDemo_unqcd_daily$Treatment=factor(x='Active',levels=c('Active','Sham'))
+FCMergedDemo_unqcd_daily$Treatment[FCMergedDemo_unqcd_daily$Group=='Y']='Sham'
+# saved at 1000 x 1000 
+ggplot(FCMergedDemo_unqcd_daily,aes(x=Treatment,y=value))+geom_boxplot()+theme_minimal(base_size = 52)+ylab('Mean F.D.')+xlab('Group')
+
+
+
+#print N active, N sham
+a=FCMergedDemo[FCMergedDemo$Group=='X',]
+s=FCMergedDemo[FCMergedDemo$Group=='Y',]
+print(paste0('N active = ',length(unique(a$Subject))))
+print(paste0('N sham = ',length(unique(s$Subject))))
+
+# print average age, sd (length 40, 20 active + 20 sham)
+age=unique(FCMergedDemo$Age.at.screening.consent)
+print(paste0('mean age = ',mean(age)))
+print(paste0('sd = ', sd(age)))
+# print sex breakdown, use duplicate to get one entry per subj
+sex=FCMergedDemo$Gender[!duplicated(FCMergedDemo$Subject)]
+print(table(sex))
+
+# one row per subject indexing
+subj <- FCMergedDemo[!duplicated(FCMergedDemo$Subject), ]
+# contingency table: sex by group
+tab <- table(Gender = subj$Gender, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence (no continuity correction)
+chisq.test(tab, correct = FALSE)
+
+
+# print mean scans per participant, s.d.
+nscansvec=NULL
+for (p in 1:length(unique(FCMergedDemo$Subject))){
+  subjdf=FCMergedDemo[FCMergedDemo$Subject==unique(FCMergedDemo$Subject)[p],]
+  nscans=dim(subjdf)[1]
+  nscansvec[p]=nscans
+}
+print(paste0('mean scans per PT = ', mean(nscansvec)))
+print(paste0('sd scans per PT = ', sd(nscansvec)))
+# print more info for table 1: sex and age by condition group
+sex_a=a$Gender[!duplicated(a$Subject)]
+print(table(sex_a))
+sex_s=s$Gender[!duplicated(s$Subject)]
+print(table(sex_s))
+
+age_a=a$Age.at.screening.consent[!duplicated(a$Subject)]
+print(mean(age_a))
+print(sd(age_a))
+age_s=s$Age.at.screening.consent[!duplicated(s$Subject)]
+print(mean(age_s))
+print(sd(age_s))
+
+# ANOVA for group dif
+age_df <- data.frame(
+  Age   = c(age_a, age_s),
+  Group = factor(rep(c("X", "Y"), times = c(length(age_a), length(age_s))))
+)
+fit <- aov(Age ~ Group, data = age_df)
+summary(fit)
+
+### racial info
+# white
+print(table(a$White[!duplicated(a$Subject)]))
+print(table(s$White[!duplicated(s$Subject)]))
+# contingency table: white by group
+tab <- table(Gender = subj$White, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence
+chisq.test(tab, correct = FALSE)
+
+
+# asian
+print(table(a$Asian[!duplicated(a$Subject)]))
+print(table(s$Asian[!duplicated(s$Subject)]))
+# contingency table: asian by group
+tab <- table(Gender = subj$Asian, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence
+chisq.test(tab, correct = FALSE)
+
+
+
+
+# AI/AA
+print(table(a$American.Indian.Alaska.Native[!duplicated(a$Subject)]))
+print(table(s$American.Indian.Alaska.Native[!duplicated(s$Subject)]))
+# contingency table: Ai/AA by group
+tab <- table(Gender = subj$American.Indian.Alaska.Native, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence
+chisq.test(tab, correct = FALSE)
+
+# black
+print(table(a$Black[!duplicated(a$Subject)]))
+print(table(s$Black[!duplicated(s$Subject)]))
+
+# other
+print(table(a$Other[!duplicated(a$Subject)]))
+print(table(s$Other[!duplicated(s$Subject)]))
+# contingency table: other by group
+tab <- table(Gender = subj$Other, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence
+chisq.test(tab, correct = FALSE)
+
+# Ethnicity
+print(table(a$Ethnicity[!duplicated(a$Subject)]))
+print(table(s$Ethnicity[!duplicated(s$Subject)]))
+
+# contingency table: ethinicity by group
+tab <- table(Gender = subj$Ethnicity, Group = subj$Group)
+print(tab)
+# Pearson chi-square test of independence
+chisq.test(tab, correct = FALSE)
+
+# number of past episodes
+print(mean(a$Number.of.past.episodes..not.including.current.[!duplicated(a$Subject)]))
+print(sd(a$Number.of.past.episodes..not.including.current.[!duplicated(a$Subject)]))
+print(mean(s$Number.of.past.episodes..not.including.current.[!duplicated(s$Subject)]))
+print(sd(s$Number.of.past.episodes..not.including.current.[!duplicated(s$Subject)]))
+# ANOVA for group dif
+ep_df <- data.frame(
+  numEp   = c(a$Number.of.past.episodes..not.including.current.[!duplicated(a$Subject)], s$Number.of.past.episodes..not.including.current.[!duplicated(s$Subject)]),
+  Group = factor(rep(c("X", "Y"), times = c(length(a$Number.of.past.episodes..not.including.current.[!duplicated(a$Subject)]), length(s$Number.of.past.episodes..not.including.current.[!duplicated(s$Subject)]))))
+)
+fit <- aov(numEp ~ Group, data = ep_df)
+summary(fit)
+
+
+# duration of current episode
+print(mean(a$Duration.of.current.episode..months.[!duplicated(a$Subject)]))
+print(sd(a$Duration.of.current.episode..months.[!duplicated(a$Subject)]))
+print(mean(s$Duration.of.current.episode..months.[!duplicated(s$Subject)]))
+print(sd(s$Duration.of.current.episode..months.[!duplicated(s$Subject)]))
+
+# ANOVA for group dif
+dur_df <- data.frame(
+  DurEp   = c(a$Duration.of.current.episode..months.[!duplicated(a$Subject)], s$Duration.of.current.episode..months.[!duplicated(s$Subject)]),
+  Group = factor(rep(c("X", "Y"), times = c(length(a$Duration.of.current.episode..months.[!duplicated(a$Subject)]), length(s$Duration.of.current.episode..months.[!duplicated(s$Subject)]))))
+)
+fit <- aov(DurEp ~ Group, data = dur_df)
+summary(fit)
+
+# past antidepressant failures
+print(mean(a$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(a$Subject)]))
+print(sd(a$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(a$Subject)]))
+print(mean(s$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(s$Subject)]))
+print(sd(s$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(s$Subject)]))
+
+# ANOVA for group dif
+Afail_df <- data.frame(
+  Afail   = c(a$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(a$Subject)], s$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(s$Subject)]),
+  Group = factor(rep(c("X", "Y"), times = c(length(a$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(a$Subject)]), length(s$Number.of.lifetime.adequate.antidepressant.failures[!duplicated(s$Subject)]))))
+)
+fit <- aov(Afail ~ Group, data = Afail_df)
+summary(fit)
+
+# baseline maudsley is in demo file, note only one mauds measure was taken (baseline)
+print(mean(a$Maudsley.Staging.Method.Score[!duplicated(a$Subject)]))
+
+print(sd(a$Maudsley.Staging.Method.Score[!duplicated(a$Subject)]))
+print(mean(s$Maudsley.Staging.Method.Score[!duplicated(s$Subject)]))
+print(sd(s$Maudsley.Staging.Method.Score[!duplicated(s$Subject)]))
+
+# ANOVA for group dif
+Maud_df <- data.frame(
+  Maud   = c(a$Maudsley.Staging.Method.Score[!duplicated(a$Subject)], s$Maudsley.Staging.Method.Score[!duplicated(s$Subject)]),
+  Group = factor(rep(c("X", "Y"), times = c(length(a$Maudsley.Staging.Method.Score[!duplicated(a$Subject)]), length(s$Maudsley.Staging.Method.Score[!duplicated(s$Subject)]))))
+)
+fit <- aov(Maud ~ Group, data = Maud_df)
+summary(fit)
+```
+
+```{r}
+#### hypothesis 1
+# fisher's Z
+FCMergedDemo$DM_sgAv_z=atanh(FCMergedDemo$DM_sgAv)
+
+# average per-day for AR model
+FC_daily <- FCMergedDemo %>%
+  group_by(Subject, DaysSinceInit) %>%
+  summarise(
+    # average da FC
+    DM_sgAv_z = if (all(is.na(DM_sgAv_z))) {
+      NA_real_
+    } else {
+      mean(DM_sgAv_z, na.rm = TRUE)
+    },
+    # some days will only have 1 scan surviving QC
+    n_scans = sum(!is.na(DM_sgAv_z)),
+    # group is constant
+    Group = first(Group),
+    # gender constant
+    Gender = first(Gender),
+    # sex constant
+    Sex = first(Biological.sex...i.e..sex.assigned.at.birth.),
+    # fd is per scan
+    Mean_FD = if (all(is.na(Mean_FD))) {
+      NA_real_
+    } else {
+      mean(Mean_FD, na.rm = TRUE)
+    },
+    # constant
+    Asian = first(Asian),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(DM_sgAv_z)) %>%
+  mutate(
+    Subject = factor(Subject),
+    Group = relevel(factor(Group), ref = "Y"),
+    Gender = factor(Gender)
+  ) %>%
+  arrange(Subject, DaysSinceInit)
+
+# pre-specified autoregressive model (unadjusted)
+m_daily_AR_unadj <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_unadj))
+# technically pre-register calls for anova, but results identical
+print(anova(m_daily_AR_unadj, type = "marginal"))
+# variance vibecheck
+cat("\nVariance components:\n")
+print(VarCorr(m_daily_AR_unadj))
+# low autocorrelation in FC values it seems
+cat("\nAutoregressive parameter:\n")
+print(
+  coef(
+    m_daily_AR_unadj$modelStruct$corStruct,
+    unconstrained = FALSE
+  )
+)
+
+# setting asian to 1 and unchecked to 0 for ease of interp
+FC_daily$Asian=factor(FC_daily$Asian,levels=c('Unchecked','Checked'))
+# adjusted for baseline differences
+m_daily_AR_adj1 <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Asian, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_adj1))
+
+# adjust for head motion
+m_daily_AR_adj2 <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Mean_FD, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_adj2))
+
+# adjust for gender
+m_daily_AR_adj3 <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Gender, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_adj3))
+
+# adjust for sex
+m_daily_AR_adj4 <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Sex, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_adj4))
+
+# adjust for all
+m_daily_AR_adj5 <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Mean_FD+Gender+Sex+Asian, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+
+print(summary(m_daily_AR_adj5))
+
+# evidence for autocorrelation limited, deploy mixed effects model with no AR
+m_daily_noAR_unadj <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit, random = ~ 1 | Subject, data = FC_daily)
+
+summary(m_daily_noAR_unadj)
+# covariate adjust
+m_daily_noAR_adj <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Mean_FD+Gender+Sex+Asian, random = ~ 1 | Subject, data = FC_daily)
+
+print(summary(m_daily_noAR_adj))
+
+```
+
+
+```{r}
 
 # plot it by residualizing DMN-SGACC FC on other variables in the model, leaving only the relationships of interest
-ReducedMod<-lme(DM_sgAv~Gender+Mean_FD+Age.at.screening.consent+Maudsley.Staging.Method.Score, random = ~ 1 | Subject, data = FCMergedDemo)
-FCMergedDemo$Resids=ReducedMod$residuals[,2]+mean(FCMergedDemo$DM_sgAv)
+ReducedMod <- lme(
+  fixed = DM_sgAv_z ~ DaysSinceInit, random = ~ 1 | Subject,
+  correlation = corCAR1(
+    form = ~ DaysSinceInit | Subject
+  ), data = FC_daily)
+FC_daily$Resids=ReducedMod$residuals[,2]+mean(FC_daily$DM_sgAv_z)
 # clarify group legend label
-FCMergedDemo$Treatment=factor(x='Active',levels=c('Active','Sham'))
-FCMergedDemo$Treatment[FCMergedDemo$Group=='Y']='Sham'
+FC_daily$Treatment=factor(x='Active',levels=c('Active','Sham'))
+FC_daily$Treatment[FC_daily$Group=='Y']='Sham'
 # saved at 2100 x 1600
-ggplot(FCMergedDemo,aes(x=DaysSinceInit,y=Resids,Group=Treatment,color=Treatment))+geom_point(alpha=.7,size=5)+geom_smooth(method='lm')+theme_minimal(base_size = 52)+ylab('DMN-sgACC FC')+xlab('Days of Treatment')+scale_color_manual(values=c('#8ac926','#ffca3a'))
-print(summary(Dif_TRx))
+ggplot(FC_daily,aes(x=DaysSinceInit,y=Resids,Group=Treatment,color=Treatment))+geom_point(alpha=.7,size=6)+geom_smooth(method='lm')+theme_minimal(base_size = 52)+ylab('DMN-sgACC FC')+xlab('Days of Treatment')+scale_color_manual(values=c('#8ac926','#ffca3a'))
 
 
-### other covs for supplementary plot
+
+
 # sex
-ggplot(FCMergedDemo,aes(x=Gender,y=DM_sgAv))+geom_boxplot()+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Sex')
+ggplot(FC_daily,aes(x=Sex,y=DM_sgAv_z))+geom_boxplot()+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Sex A.A.B.')
+# Gender
+ggplot(FC_daily,aes(x=Gender,y=DM_sgAv_z))+geom_boxplot()+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Self-identified Gender')
 # FD
-ggplot(FCMergedDemo,aes(x=Mean_FD,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Framewise Displacement')
-# Age
-ggplot(FCMergedDemo,aes(x=Age.at.screening.consent,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Age (Years)')
-# Maudsley
-ggplot(FCMergedDemo,aes(x=Maudsley.Staging.Method.Score,y=DM_sgAv))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Maudsley Staging Method Score')
+ggplot(FC_daily,aes(x=Mean_FD,y=DM_sgAv_z))+geom_point()+geom_smooth(method = 'lm')+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Mean F.D.')
+# Asian
+ggplot(FC_daily,aes(x=Asian,y=DM_sgAv_z))+geom_boxplot()+theme_minimal(base_size = 35)+ylab('DMN-sgACC FC')+xlab('Self-Identified Asian')
+
+library(RColorBrewer)
+# refit  model for representative random effects
+Dif_TRx <- lme(
+  fixed = DM_sgAv_z ~ Group * DaysSinceInit+Mean_FD+Gender+Sex+Asian, random = ~ 1 | Subject, data = FC_daily)
 
 
-# random interepts: requires subject colors, specified as follows:
-subj_colors <- setNames(
-  colorRampPalette(RColorBrewer::brewer.pal(12, "Paired"))(53),
-  sprintf("s%03d", 1:53)
-)
-# primary model
-Dif_TRx<-lme(DM_sgAv ~Gender+Mean_FD+DaysSinceInit*Group+Age.at.screening.consent+Maudsley.Staging.Method.Score, random = ~ 1 | Subject, data = FCMergedDemo)
-ranef_df <- data.frame(
-  Subject = rownames(ranef(Dif_TRx)),
-  RandomIntercept = ranef(Dif_TRx)[, 1]
-)
-
-ranef_df$Subject <- as.character(ranef_df$Subject)
-# Order subjects by random intercept
+# random intercepts, one row per subject actually in the model
 ranef_df <- data.frame(
   Subject = rownames(ranef(Dif_TRx)),
   RandomIntercept = ranef(Dif_TRx)[, 1],
   row.names = NULL
 )
 
-# Maintain original subject ordering
-ranef_df$Subject <- factor(
-  ranef_df$Subject,
-  levels = sprintf("s%03d", 1:53)
+# keep original ID order (zero-padded IDs sort correctly), then number 1:n
+ranef_df <- ranef_df[order(ranef_df$Subject), ]
+n <- nrow(ranef_df)
+ranef_df$SubjNum <- factor(seq_len(n))
+
+# colors sized to the actual n, named by the sequential number
+subj_colors <- setNames(
+  colorRampPalette(brewer.pal(12, "Paired"))(n),
+  levels(ranef_df$SubjNum)
 )
 
-ggplot(ranef_df,
-       aes(
-         x = Subject,
-         y = RandomIntercept,
-         color = Subject
-       )) +
-  geom_hline(
-    yintercept = 0,
-    color = "grey70",
-    linewidth = 0.8
-  ) +
+ggplot(ranef_df, aes(x = SubjNum, y = RandomIntercept, color = SubjNum)) +
+  geom_hline(yintercept = 0, color = "grey70", linewidth = 0.8) +
   geom_point(size = 5) +
-  scale_color_manual(
-    values = subj_colors,
-    drop = FALSE
-  ) +
+  scale_color_manual(values = subj_colors) +
   labs(
     title = "Subject-specific random intercepts",
     x = NULL,
     y = "DMN-sgACC FC"
   ) +
-  theme_minimal(base_size=35) +
+  theme_minimal(base_size = 35) +
   theme(
-    plot.title = element_text(
-      face = "bold",
-      size = 35
-    ),
-    axis.text.x = element_text(
-      angle = 90,
-      hjust = 1,
-      vjust = 0.5,
-      size = 30
-    ),
+    plot.title = element_text(face = "bold", size = 35),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 30),
     axis.text.y = element_text(size = 35),
     legend.position = "none",
     panel.grid.minor = element_blank()
@@ -361,7 +634,31 @@ MADRSInfo$Key_Sess <- paste(MADRSInfo$Subject, MADRSInfo$sesh, sep = "_")
 # merge em
 FCMergedMADRS=merge(FCMergedDemo,MADRSInfo,by=c("Key_Sess","Subject"))
 FCMergedMADRS=FCMergedMADRS[!is.na(FCMergedMADRS$madrs_total_mentorrater),]
+# retain FCMergedMADRS-CR for later
+FCMergedMADRSCR=FCMergedMADRS
 
+# report baseline MADRS CR
+aSubjs_included=unique(a$Subject)
+sSubjs_included=unique(s$Subject)
+BV_madrs=MADRSInfo[MADRSInfo$redcap_event_name=='baseline_visit_2_arm_2',]
+BV_madrs_active=BV_madrs[BV_madrs$Subject %in% aSubjs_included,]
+BV_madrs_sham=BV_madrs[BV_madrs$Subject %in% sSubjs_included,]
+
+# print mean, sd
+print(paste0('Mean Madrs-CR, Active: ',mean(BV_madrs_active$madrs_total_mentorrater)))
+print(paste0('Madrs-CR s.d., Active: ',sd(BV_madrs_active$madrs_total_mentorrater)))
+print(paste0('Mean Madrs-CR, Sham: ',mean(BV_madrs_sham$madrs_total_mentorrater)))
+print(paste0('Madrs-CR s.d., Sham: ',sd(BV_madrs_sham$madrs_total_mentorrater)))
+
+# ANOVA for group dif
+madrs_a <- BV_madrs_active$madrs_total_mentorrater
+madrs_s <- BV_madrs_sham$madrs_total_mentorrater
+MCR_df <- data.frame(
+  Madrs = c(madrs_a, madrs_s),
+  Group = factor(rep(c("X", "Y"), times = c(length(madrs_a), length(madrs_s))))
+)
+fit <- aov(Madrs ~ Group, data = MCR_df)
+summary(fit)
 
 # calculate change in FC (V8 - V3)
 FCMergedMADRS_change <- FCMergedMADRS[FCMergedMADRS$sesh.x %in% c(3, 8), ]
@@ -402,16 +699,27 @@ YchangeCor=cor.test(Ychange$MADRS_change,Ychange$FC_change)$estimate
 
 # test MADRS change scores
 library(diffcor)
-diffcor.two(XchangeCor,YchangeCor,16,15)
+diffcor.two(XchangeCor,YchangeCor,16,15,alternative = 'two.sided')
 
 ```
 
 
 ```{r Fig2, echo=TRUE, fig.height=15,fig.width=18}
-# plot it
+# plot it: 1500 x 1200
 change_scores$Treatment=factor(x='Active',levels=c('Active','Sham'))
 change_scores$Treatment[change_scores$Group.x=='Y']='Sham'
-ggplot(data=change_scores,aes(x=FC_change,y=MADRS_change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('MADRS Change \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
+# - for reverse-scoring (harmonization with IMS change)
+ggplot(data=change_scores,aes(x=FC_change,y=-MADRS_change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('MADRS-CR Improvement \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
+
+# now evaluate as group for comparison
+change_scores_active=change_scores[change_scores$Group.x=='X',]
+medianFC_delta=median(change_scores_active$FC_change)
+# more than median change
+change_scores_active_moreFCchange=change_scores_active[change_scores_active$FC_change<medianFC_delta,]
+# less than median change (> because change is negative)
+change_scores_active_lessFCchange=change_scores_active[change_scores_active$FC_change>medianFC_delta,]
+
+
 ```
 
 ```{r}
@@ -441,13 +749,46 @@ MADRSInfo$Subject <- sub("a$", "", MADRSInfo$Subject)
 
 # ok, now we need a session-wise key instead of subj/session/scan because we dont have a MADRS for each scan
 FCMergedDemo$Key_Sess <- sub("_[0-9]+$", "", FCMergedDemo$key)
-
+FCMergedDemo_unqcd$Key_Sess <- sub("_[0-9]+$", "", FCMergedDemo_unqcd$key)
 # cool, now we need an equivalent key column
 MADRSInfo$Key_Sess <- paste(MADRSInfo$Subject, MADRSInfo$sesh, sep = "_")
 
 # merge em
 FCMergedMADRS=merge(FCMergedDemo,MADRSInfo,by=c("Key_Sess","Subject"))
 FCMergedMADRS=FCMergedMADRS[!is.na(FCMergedMADRS$madrs_s_total),]
+# and an unqc'd version for testing FD by treatment respone
+FCMergedMADRS_unqcd=merge(FCMergedDemo_unqcd,MADRSInfo,by=c("Key_Sess","Subject"))
+FCMergedMADRS_unqcd=FCMergedMADRS_unqcd[!is.na(FCMergedMADRS_unqcd$madrs_s_total),]
+# collapse into an average FD per person so we can eval average mean FD and treatment response
+mean_FD_unqcd <- FCMergedMADRS_unqcd %>%
+  group_by(Subject, Group, sesh.x) %>%
+  summarise(Mean_FD = mean(Mean_FD, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = sesh.x, 
+              values_from = Mean_FD,
+              names_prefix = "V")
+# cross session mean
+mean_FD_unqcd$Mean_MeanFD=rowMeans(mean_FD_unqcd[,3:8],na.rm=T)
+
+# report baseline MADRS SR
+BV_madrs=MADRSInfo[MADRSInfo$redcap_event_name=='baseline_visit_2_arm_2',]
+BV_madrs_active=BV_madrs[BV_madrs$Subject %in% aSubjs_included,]
+BV_madrs_sham=BV_madrs[BV_madrs$Subject %in% sSubjs_included,]
+
+# print mean, sd
+print(paste0('Mean Madrs-SR, Active: ',mean(BV_madrs_active$madrs_s_total)))
+print(paste0('Madrs-SR s.d., Active: ',sd(BV_madrs_active$madrs_s_total)))
+print(paste0('Mean Madrs-SR, Sham: ',mean(BV_madrs_sham$madrs_s_total)))
+print(paste0('Madrs-SR s.d., Sham: ',sd(BV_madrs_sham$madrs_s_total)))
+
+# ANOVA for group dif
+madrs_a <- BV_madrs_active$madrs_s_total
+madrs_s <- BV_madrs_sham$madrs_s_total
+MSR_df <- data.frame(
+  Madrs = c(madrs_a, madrs_s),
+  Group = factor(rep(c("X", "Y"), times = c(length(madrs_a), length(madrs_s))))
+)
+fit <- aov(Madrs ~ Group, data = MSR_df)
+summary(fit)
 
 
 # calculate change in FC (V8 - V3)
@@ -462,7 +803,6 @@ FC_change <- FCMergedMADRS_change %>%
   filter(!is.na(FC_change))
 
 # calculate change in MADRS
-
 MADRS_change <- FCMergedMADRS_change %>%
   group_by(Subject, sesh.x,Group) %>%
   summarise(MADRS_mean = mean(madrs_s_total, na.rm = TRUE), .groups = "drop") %>%
@@ -471,6 +811,43 @@ MADRS_change <- FCMergedMADRS_change %>%
               names_prefix = "V") %>%
   mutate(MADRS_change = V8 - V3) %>%
   filter(!is.na(MADRS_change))# Remove subjects without both timepoints
+
+# long term change in MADRS: get one value per subject
+Madrs_V3=MADRSInfo[MADRSInfo$sesh=='V3',]
+Madrs_V10=MADRSInfo[MADRSInfo$sesh=='V10',]
+#subset just useful columns
+Madrs_V3=Madrs_V3[,c('Subject','Key_Sess','madrs_s_total')]
+Madrs_V10=Madrs_V10[,c('Subject','Key_Sess','madrs_s_total')]
+# rename to V3 for merging
+colnames(Madrs_V3)[3]='madrs_s_total_v3'
+#v10
+colnames(Madrs_V10)[3]='madrs_s_total_v10'
+Madrs_V3V10=merge(Madrs_V3,Madrs_V10,by='Subject')
+Madrs_V3V10$LongTermChange=Madrs_V3V10$madrs_s_total_v3-Madrs_V3V10$madrs_s_total_v10
+# now compare to in-trial FC changes
+LT_madrs_FCchange=merge(FC_change,Madrs_V3V10,by='Subject')
+
+# quick test for average Mean FD and trx response: need to create more inclusive version of madrs change
+MadrsBV_all=MADRSInfo[MADRSInfo$redcap_event_name=='study_day_1_visit_arm_2',]
+MadrsEnd_all=MADRSInfo[MADRSInfo$redcap_event_name=='next_day_visit_vis_arm_2',]
+MadrsBV_End_all=merge(MadrsBV_all,MadrsEnd_all,by='record_id')
+MadrsBV_End_all$Change=MadrsBV_End_all$madrs_s_total.y-MadrsBV_End_all$madrs_s_total.x
+# merge with unqcd fd measures
+MadrsBV_End_all$Subject=MadrsBV_End_all$Subject.x
+FD_trxResp=merge(MadrsBV_End_all,mean_FD_unqcd,by='Subject')
+# one value per subject so correlation is fine
+cor.test(FD_trxResp$Change,FD_trxResp$Mean_MeanFD)
+# just for plotting (S3)
+FD_trxResp$Treatment=factor(x='Active',levels=c('Active','Sham'))
+FD_trxResp$Treatment[FC_daily$Group.x=='Y']='Sham'
+# saved at 1000 x 1000 
+ggplot(FD_trxResp,aes(y=Mean_MeanFD,x=Change))+geom_point()+geom_smooth(method='lm')+theme_minimal(base_size = 52)+xlab('MADRS-S Change')+ylab('Mean F.D.')
+# need lme for group int value per subject so correlation is fine
+anotherCheckModel=lm(Mean_MeanFD~Change*Group,data=FD_trxResp)
+print(summary(anotherCheckModel))
+# last plot before returning to more interesting analyses
+# saved at 1500 x 1000 
+ggplot(FD_trxResp,aes(y=Mean_MeanFD,x=Change,group=Group,color=Group))+geom_point()+geom_smooth(method='lm')+theme_minimal(base_size = 52)+xlab('MADRS-S Change')+ylab('Mean F.D.')+scale_color_manual(labels=c('Sham','Active'),values=c('#ffca3a','#8ac926'))+labs(color='Group')
 
 # according to protocol, evaluate normality of change in FC and MADRS (shapiro-wilk)
 shapiro.test(MADRS_change$MADRS_change)
@@ -484,19 +861,27 @@ change_scores <- merge(MADRS_change, FC_change, by = "Subject")
 Xchange=change_scores[change_scores$Group.x=='X',]
 Ychange=change_scores[change_scores$Group.x=='Y',]
 
+#Long term
+XchangeLT=LT_madrs_FCchange[LT_madrs_FCchange$Group=='X',]
+YchangeLT=LT_madrs_FCchange[LT_madrs_FCchange$Group=='Y',]
+
+# corrs
 XchangeCor=cor.test(Xchange$MADRS_change,Xchange$FC_change,method='spearman')$estimate
 YchangeCor=cor.test(Ychange$MADRS_change,Ychange$FC_change,method='spearman')$estimate
 
 # test MADRS change scores
 library(diffcor)
-diffcor.two(XchangeCor,YchangeCor,16,15)
+diffcor.two(XchangeCor,YchangeCor,16,15,alternative = 'two.sided')
+
 ```
 
 ```{r Fig3, echo=TRUE, fig.height=15,fig.width=18}
 # plot it - saved at 1500x1200
 change_scores$Treatment=factor(x='Active',levels=c('Active','Sham'))
 change_scores$Treatment[change_scores$Group.x=='Y']='Sham'
-ggplot(data=change_scores,aes(x=FC_change,y=MADRS_change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('MADRS Change \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
+# - for reverse-scoring (harmonization with IMS change)
+ggplot(data=change_scores,aes(x=FC_change,y=-MADRS_change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('MADRS-SR Improvement \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
+
 ```
 
 
@@ -517,6 +902,28 @@ FCMergedIMS=merge(FCMergedDemo,IMS,by=c("Key_Sess","Subject"))
 # omit NAs
 FCMergedIMS=FCMergedIMS[!is.na(FCMergedIMS$ims12_totalscore),]
 FCMergedIMS_Change <- FCMergedIMS[FCMergedIMS$sesh.x %in% c(3, 8), ]
+
+# report baseline IMS
+BV_ims=IMS[IMS$redcap_event_name=='baseline_visit_2_arm_2',]
+BV_ims_active=BV_ims[BV_ims$Subject %in% aSubjs_included,]
+BV_ims_sham=BV_ims[BV_ims$Subject %in% sSubjs_included,]
+
+# print mean, sd
+print(paste0('Mean IMS, Active: ',mean(na.omit(BV_ims_active$ims12_totalscore))))
+print(paste0('IMS s.d., Active: ',sd(na.omit(BV_ims_active$ims12_totalscore))))
+print(paste0('Mean IMS, Sham: ',mean(na.omit(BV_ims_sham$ims12_totalscore))))
+print(paste0('IMS s.d., Sham: ',sd(na.omit(BV_ims_sham$ims12_totalscore))))
+
+# ANOVA for group dif
+ims_a <- BV_ims_active$ims12_totalscore
+ims_s <- BV_ims_sham$ims12_totalscore
+IMS_df <- data.frame(
+  IMS = c(ims_a, ims_s),
+  Group = factor(rep(c("X", "Y"), times = c(length(ims_a), length(ims_s))))
+)
+fit <- aov(IMS ~ Group, data = IMS_df)
+summary(fit)
+
 
 # FC Change
 FC_change <- FCMergedIMS_Change %>%
@@ -555,7 +962,7 @@ Ychange=change_scores[change_scores$Group.x=='Y',]
 XchangeCor=cor.test(Xchange$IMS_Change,Xchange$FC_change,method='spearman')$estimate
 YchangeCor=cor.test(Ychange$IMS_Change,Ychange$FC_change,method='spearman')$estimate
 # test IMS change scores
-diffcor.two(XchangeCor,YchangeCor,17,17)
+diffcor.two(XchangeCor,YchangeCor,17,17,alternative = 'two.sided')
 
 ```
 
@@ -564,156 +971,252 @@ diffcor.two(XchangeCor,YchangeCor,17,17)
 # plot it - saved at 1500x1200
 change_scores$Treatment=factor(x='Active',levels=c('Active','Sham'))
 change_scores$Treatment[change_scores$Group.x=='Y']='Sham'
-ggplot(data=change_scores,aes(x=FC_change,y=IMS_Change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('IMS Change \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
+ggplot(data=change_scores,aes(x=FC_change,y=IMS_Change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('IMS Improvement \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
 ```
-
 
 ```{r}
+#### follow-up with more straightforward symptom - sgacc assoc: use timepoints intead of collapsed treatment change brain change
 
-# temporal precedence
-#################
-# Cross-lagged panel analysis: DMN-sgACC FC vs. MADRS-SR and vs. IMS
-# Does FC(t) predict symptom(t+1) controlling for symptom(t) [FC -> symptom],
-# and does symptom(t) predict FC(t+1) controlling for FC(t) [symptom -> FC]?
-#################
+# IMS daily
+FC_IMS_daily <- FCMergedIMS %>%
+  group_by(Subject, DaysSinceInit) %>%
+  summarise(
+    DM_sgAv_z = if (all(is.na(DM_sgAv_z))) {
+      NA_real_
+      # if there's data
+    } else {
+      mean(DM_sgAv_z, na.rm = TRUE)
+    },
+    ims12_totalscore = if (all(is.na(ims12_totalscore))) {
+      NA_real_
+      # if there's data
+    } else {
+      first(na.omit(ims12_totalscore))
+    },
+    n_scans = sum(!is.na(DM_sgAv_z)),
+    # group is fixed so first is sufficient to summarize
+    Group = first(Group),
+    .groups = "drop"
+)
 
-library(lme4)
-library(lmerTest)
+# model daily IMS-sgacc FC association by group
+model_daily <- lme(
+    fixed = ims12_totalscore ~ DM_sgAv_z*Group,
+    random = ~ 1 | Subject,
+    data = FC_IMS_daily)
+print(summary(model_daily))
 
-# ---- 1. Collapse FC to one value per subject per session ----
-# (Key_Sess already exists on FCMergedDemo from the MADRS chunk above)
-FC_persession <- aggregate(DM_sgAv ~ Subject + Key_Sess + Group,
-                            data = FCMergedDemo, FUN = mean)
-FC_persession$SessNum <- as.numeric(sub(".*_V", "", FC_persession$Key_Sess))
-
-# ---- 2A. FC vs MADRS-SR ----
-# MADRSInfo at this point in the script IS the self-report version
-# (brains_madrs-s.csv was the last thing read into it), already has
-# Key_Sess and madrs_s_total
-FC_SR <- merge(FC_persession, MADRSInfo[, c("Subject", "Key_Sess", "madrs_s_total")],
-               by = c("Subject", "Key_Sess"))
-FC_SR <- FC_SR[!is.na(FC_SR$madrs_s_total), ]
-FC_SR <- FC_SR[order(FC_SR$Subject, FC_SR$SessNum), ]
-
-make_lag_pairs_FC_SR <- function(d) {
-  n <- nrow(d)
-  if (n < 2) return(NULL)
-  cur <- d[1:(n - 1), ]
-  nxt <- d[2:n, ]
-  data.frame(
-    Subject = cur$Subject, Group = cur$Group,
-    Sess_t = cur$SessNum, Sess_t1 = nxt$SessNum,
-    fc_t = cur$DM_sgAv, sr_t = cur$madrs_s_total,
-    fc_t1 = nxt$DM_sgAv, sr_t1 = nxt$madrs_s_total
+# Create daily-averaged dataset for MADRS-S
+FC_MADRS_daily <- FCMergedMADRS %>%
+  group_by(Subject, DaysSinceInit) %>%
+  summarise(
+    # Average Fisher-Z FC across scans
+    DM_sgAv_z = if (all(is.na(DM_sgAv_z))) {
+      NA_real_
+    } else {
+      mean(DM_sgAv_z, na.rm = TRUE)
+    },
+    # One MADRS score per day
+    madrs_s_total = if (all(is.na(madrs_s_total))) {
+      NA_real_
+    } else {
+      first(na.omit(madrs_s_total))
+    },
+    # Preserve treatment group
+    Group = first(Group),
+    # Number of valid FC scans
+    n_scans = sum(!is.na(DM_sgAv_z)),
+    .groups = "drop"
   )
+
+# Create daily-averaged dataset for MADRS-CR
+FC_MADRSCR_daily <- FCMergedMADRSCR %>%
+  group_by(Subject, DaysSinceInit) %>%
+  summarise(
+    # average FC across scans
+    DM_sgAv_z = if (all(is.na(DM_sgAv_z))) {
+      NA_real_
+    } else {
+      mean(DM_sgAv_z, na.rm = TRUE)
+    },
+    # One MADRS score per day
+    madrs_total_mentorrater = if (all(is.na(madrs_total_mentorrater))) {
+      NA_real_
+    } else {
+      first(na.omit(madrs_total_mentorrater))
+    },
+    # Preserve treatment group
+    Group = first(Group),
+    # Number of valid FC scans
+    n_scans = sum(!is.na(DM_sgAv_z)),
+    .groups = "drop"
+  )
+
+
+
+# tests for madrs~brain
+model_MADRS_interaction <- lme(
+  fixed = madrs_s_total ~ DM_sgAv_z * Group,
+  random = ~ 1 | Subject,
+  data = FC_MADRS_daily,
+  method = "REML"
+)
+print(summary(model_MADRS_interaction))
+
+model_MADRS_CR_interaction <- lme(
+  fixed = madrs_total_mentorrater ~ DM_sgAv_z * Group,
+  random = ~ 1 | Subject,
+  data = FC_MADRSCR_daily,
+  method = "REML"
+)
+print(summary(model_MADRS_CR_interaction))
+
+# plot it out!
+library(patchwork)
+
+# this function is for subject-centering for plotting, works to match the subject-level intercepts instituted for models (random effects)
+make_subject_adjusted <- function(data, outcome) {
+  data %>%
+    group_by(Group, Subject) %>%
+    mutate(
+      # subject means
+      FC_subject_mean = mean(DM_sgAv_z, na.rm = TRUE),
+      Y_subject_mean  = mean(.data[[outcome]], na.rm = TRUE),
+      # subject-centered values
+      FC_within = DM_sgAv_z - FC_subject_mean,
+      Y_within  = .data[[outcome]] - Y_subject_mean
+    ) %>%
+    ungroup() %>%
+    group_by(Group) %>%
+    mutate(
+      # back to group means for interpretable axes in fig
+      FC_adjusted = FC_within + mean(DM_sgAv_z, na.rm = TRUE),
+      Y_adjusted  = Y_within + mean(.data[[outcome]], na.rm = TRUE)
+    ) %>%
+    ungroup()
 }
 
-# bind it all together
-lagged_FC_SR <- do.call(rbind, lapply(split(FC_SR, FC_SR$Subject), make_lag_pairs_FC_SR))
+# now apply the functions for interpretable plots
 
-# normalize
-lagged_FC_SR$fc_t_z  <- scale(lagged_FC_SR$fc_t)
-lagged_FC_SR$sr_t_z  <- scale(lagged_FC_SR$sr_t)
-lagged_FC_SR$fc_t1_z <- scale(lagged_FC_SR$fc_t1)
-lagged_FC_SR$sr_t1_z <- scale(lagged_FC_SR$sr_t1)
-lagged_FC_SR$Subject <- as.factor(lagged_FC_SR$Subject)
+IMS_adjusted <- make_subject_adjusted(
+  FC_IMS_daily,
+  "ims12_totalscore"
+)
 
-mod_sr_next_from_fc <- lmer(sr_t1_z ~ sr_t_z + fc_t_z + (1 | Subject),
-                             data = lagged_FC_SR, REML = FALSE)
-mod_fc_next_from_sr <- lmer(fc_t1_z ~ fc_t_z + sr_t_z + (1 | Subject),
-                             data = lagged_FC_SR, REML = FALSE)
+MADRS_adjusted <- make_subject_adjusted(
+  FC_MADRS_daily,
+  "madrs_s_total"
+)
 
-cat("\n=== FC(t) -> MADRS-SR(t+1), controlling MADRS-SR(t) ===\n")
-print(summary(mod_sr_next_from_fc)$coefficients)
-cat("\n=== MADRS-SR(t) -> FC(t+1), controlling FC(t) ===\n")
-print(summary(mod_fc_next_from_sr)$coefficients)
+MADRS_CR_adjusted <- make_subject_adjusted(
+  FC_MADRSCR_daily,
+  "madrs_total_mentorrater"
+)
 
-# ---- 2B. FC vs IMS ----
-FC_IMS <- merge(FC_persession, IMS[, c("Subject", "Key_Sess", "ims12_totalscore")],
-                by = c("Subject", "Key_Sess"))
-FC_IMS <- FC_IMS[!is.na(FC_IMS$ims12_totalscore), ]
-FC_IMS <- FC_IMS[order(FC_IMS$Subject, FC_IMS$SessNum), ]
+###########
+# IMS plot
+###########
 
-
-make_lag_pairs_FC_IMS <- function(d) {
-  n <- nrow(d)
-  if (n < 2) return(NULL)
-  cur <- d[1:(n - 1), ]
-  nxt <- d[2:n, ]
-  data.frame(
-    Subject = cur$Subject, Group = cur$Group,
-    Sess_t = cur$SessNum, Sess_t1 = nxt$SessNum,
-    fc_t = cur$DM_sgAv, ims_t = cur$ims12_totalscore,
-    fc_t1 = nxt$DM_sgAv, ims_t1 = nxt$ims12_totalscore
+p_IMS <- ggplot(
+  IMS_adjusted,
+  aes(
+    x = FC_adjusted,
+    y = Y_adjusted,
+    color = Group
   )
-}
+) +
+  geom_point(alpha = 0.7, size = 5) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE,
+    linewidth = 2
+  ) +
+  scale_color_manual(
+    values = c(
+      "X" = "#8ac926",
+      "Y" = "#ffca3a"
+    ),
+    labels = c(
+      "X" = "Active",
+      "Y" = "Sham"
+    )
+  ) +
+  labs(
+    title = "IMS",
+    x = "Centered DMN–sgACC FC",
+    y = "Centered IMS score",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 24)+ theme(legend.position="none")
 
-lagged_FC_IMS <- do.call(rbind, lapply(split(FC_IMS, FC_IMS$Subject), make_lag_pairs_FC_IMS))
+######################
+# 4. MADRS-SR plot
+######################
 
-lagged_FC_IMS$fc_t_z   <- scale(lagged_FC_IMS$fc_t)
-lagged_FC_IMS$ims_t_z  <- scale(lagged_FC_IMS$ims_t)
-lagged_FC_IMS$fc_t1_z  <- scale(lagged_FC_IMS$fc_t1)
-lagged_FC_IMS$ims_t1_z <- scale(lagged_FC_IMS$ims_t1)
-lagged_FC_IMS$Subject  <- as.factor(lagged_FC_IMS$Subject)
-
-mod_ims_next_from_fc <- lmer(ims_t1_z ~ ims_t_z + fc_t_z + (1 | Subject),
-                              data = lagged_FC_IMS, REML = FALSE)
-mod_fc_next_from_ims <- lmer(fc_t1_z ~ fc_t_z + ims_t_z + (1 | Subject),
-                              data = lagged_FC_IMS, REML = FALSE)
-
-cat("\n=== FC(t) -> IMS(t+1), controlling IMS(t) ===\n")
-print(summary(mod_ims_next_from_fc)$coefficients)
-cat("\n=== IMS(t) -> FC(t+1), controlling FC(t) ===\n")
-print(summary(mod_fc_next_from_ims)$coefficients)
-
-# ---- 2C. FC vs MADRS-CR ----
-# MADRSInfo was overwritten by brains_madrs-s.csv earlier in the script,
-# so the CR version needs to be reloaded separately here
-MADRSInfo_CR <- read.csv('E:/Downloads/madrs_data_for_brains/brains_madrs-cr.csv')
-MADRSInfo_CR$sesh    <- tp_map1[MADRSInfo_CR$redcap_event_name]
-MADRSInfo_CR$Subject <- sub(".*_(s[0-9]+[a-z]?)", "\\1", MADRSInfo_CR$record_id)
-MADRSInfo_CR$Subject <- sub("a$", "", MADRSInfo_CR$Subject)
-MADRSInfo_CR$Key_Sess <- paste(MADRSInfo_CR$Subject, MADRSInfo_CR$sesh, sep = "_")
-
-FC_CR <- merge(FC_persession, MADRSInfo_CR[, c("Subject", "Key_Sess", "madrs_total_mentorrater")],
-               by = c("Subject", "Key_Sess"))
-FC_CR <- FC_CR[!is.na(FC_CR$madrs_total_mentorrater), ]
-FC_CR <- FC_CR[order(FC_CR$Subject, FC_CR$SessNum), ]
-
-make_lag_pairs_FC_CR <- function(d) {
-  n <- nrow(d)
-  if (n < 2) return(NULL)
-  cur <- d[1:(n - 1), ]
-  nxt <- d[2:n, ]
-  data.frame(
-    Subject = cur$Subject, Group = cur$Group,
-    Sess_t = cur$SessNum, Sess_t1 = nxt$SessNum,
-    fc_t = cur$DM_sgAv, cr_t = cur$madrs_total_mentorrater,
-    fc_t1 = nxt$DM_sgAv, cr_t1 = nxt$madrs_total_mentorrater
+p_MADRS <- ggplot(
+  MADRS_adjusted,
+  aes(
+    x = FC_adjusted,
+    y = Y_adjusted,
+    color = Group
   )
-}
+) + geom_point(alpha = 0.7, size = 5) +
+  geom_smooth(method='lm',linewidth = 2) +
+  scale_color_manual(
+    values = c(
+      "X" = "#8ac926",
+      "Y" = "#ffca3a"
+    ),
+    labels = c(
+      "X" = "Active",
+      "Y" = "Sham"
+    )
+  ) +
+  labs(title = "MADRS-SR", x = "Centered DMN–sgACC FC", y = "Centered MADRS-SR score") +
+  theme_minimal(base_size = 24)+ theme(legend.position="none")
 
-lagged_FC_CR <- do.call(rbind, lapply(split(FC_CR, FC_CR$Subject), make_lag_pairs_FC_CR))
+######################
+# 4. MADRS-CR plot
+######################
 
-lagged_FC_CR$fc_t_z  <- scale(lagged_FC_CR$fc_t)
-lagged_FC_CR$cr_t_z  <- scale(lagged_FC_CR$cr_t)
-lagged_FC_CR$fc_t1_z <- scale(lagged_FC_CR$fc_t1)
-lagged_FC_CR$cr_t1_z <- scale(lagged_FC_CR$cr_t1)
-lagged_FC_CR$Subject <- as.factor(lagged_FC_CR$Subject)
+p_MADRSCR <- ggplot(
+  MADRS_CR_adjusted,
+  aes(
+    x = FC_adjusted,
+    y = Y_adjusted,
+    color = Group
+  )
+) +
+  geom_point(alpha = 0.7, size = 5) +
+  geom_smooth(method = "lm",linewidth = 2) +
+  scale_color_manual(
+    values = c(
+      "X" = "#8ac926",
+      "Y" = "#ffca3a"
+    ),
+    labels = c(
+      "X" = "Active",
+      "Y" = "Sham"
+    )
+  ) +
+  labs(
+    title = "MADRS-CR",
+    x = "Centered DMN–sgACC FC",
+    y = "Centered MADRS-CR score",) +
+  theme_minimal(base_size = 24)
 
-mod_cr_next_from_fc <- lmer(cr_t1_z ~ cr_t_z + fc_t_z + (1 | Subject),
-                             data = lagged_FC_CR, REML = FALSE)
-mod_fc_next_from_cr <- lmer(fc_t1_z ~ fc_t_z + cr_t_z + (1 | Subject),
-                             data = lagged_FC_CR, REML = FALSE)
 
-cat("\n=== FC(t) -> MADRS-CR(t+1), controlling MADRS-CR(t) ===\n")
-print(summary(mod_cr_next_from_fc)$coefficients)
-cat("\n=== MADRS-CR(t) -> FC(t+1), controlling FC(t) ===\n")
-print(summary(mod_fc_next_from_cr)$coefficients)
+# Display
+######################
 
+p_IMS
+p_MADRS
+p_MADRSCR
+
+#  combined figure: 2200 x 1000
+p_IMS | p_MADRS | p_MADRSCR
 
 ```
-
 
 ```{r}
 # avoid scale to isolate within-person effects
@@ -743,45 +1246,36 @@ make_lag_pairs <- function(d, symptom_var) {
         "DM_sgAv",
         symptom_var
     )]
-
     names(d)[names(d) == symptom_var] <- "Symptom"
-
     d <- d[!is.na(d$DM_sgAv) & !is.na(d$Symptom), ]
-
     d <- d[order(d$Subject, d$SessNum), ]
-
     # Person means
     d$FC_mean <- ave(
         d$DM_sgAv,
         d$Subject,
         FUN = mean
     )
-
     d$Symptom_mean <- ave(
         d$Symptom,
         d$Subject,
         FUN = mean
     )
-
-    # Create next-day values
+    # Create next-day values (t +1)
     d$FC_t1 <- ave(
         d$DM_sgAv,
         d$Subject,
         FUN = function(x) c(x[-1], NA)
     )
-
     d$Symptom_t1 <- ave(
         d$Symptom,
         d$Subject,
         FUN = function(x) c(x[-1], NA)
     )
-
     d$Sess_t1 <- ave(
         d$SessNum,
         d$Subject,
         FUN = function(x) c(x[-1], NA)
     )
-
     # Keep ONLY true consecutive sessions
     d <- d[
     !is.na(d$Sess_t1) &
@@ -795,7 +1289,6 @@ make_lag_pairs <- function(d, symptom_var) {
     # Within-person predictors
     d$FC_t_within <-
         d$FC_t - d$FC_mean
-
     d$Symptom_t_within <-
         d$Symptom_t - d$Symptom_mean
 
@@ -973,6 +1466,7 @@ cat("\n=== MADRS-CR(t) -> FC(t+1) ===\n")
 print(summary(mod_fc_next_from_cr)$coefficients)
 ```
 
+
 ```{r,fig.width= 12, fig.height=12}
 ############################################################
 # TIME SERIES: FC AND IMS12 FOR EACH PARTICIPANT
@@ -992,9 +1486,6 @@ PTs <- unique(FC_IMS$Subject[FC_IMS$Group=='X'])
 # GROUP-LEVEL TIME SERIES: FC AND IMS12
 # Active group only
 ############################################################
-
-
-
 ### plot z score
 
 # Active group only
@@ -1010,7 +1501,6 @@ d <- d[order(d$Subject, d$SessNum), ]
 ############################################################
 # WITHIN-SUBJECT Z-SCORES
 ############################################################
-
 # FC within-person z
 d$FC_within_z <- ave(
     d$DM_sgAv,
@@ -1034,8 +1524,7 @@ d$IMS_within_z <- ave(
 
 ############################################################
 # GROUP MEAN OF WITHIN-SUBJECT Z-SCORES
-############################################################
-
+###########################################################
 group_ts <- aggregate(
     cbind(FC_within_z, IMS_within_z) ~ SessNum,
     data = d,
@@ -1046,8 +1535,6 @@ group_ts <- aggregate(
 group_ts <- group_ts[
     order(group_ts$SessNum),
 ]
-
-
 
 # Range of the two within-subject z-scores
 fc_range <- range(group_ts$FC_within_z, na.rm = TRUE)
@@ -1075,7 +1562,6 @@ group_ts$IMS_plot <- ims_scale(group_ts$IMS_within_z)
 ############################################################
 # SHARED HLINES BASED ON FULL PLOT RANGE
 ############################################################
-
 plot_min <- min(
     group_ts$FC_within_z,
     na.rm = TRUE
@@ -1167,8 +1653,6 @@ geom_hline(
 
 
 
-
-######### SHAM
 ############################################################
 # SHAM GROUP: WITHIN-SUBJECT FC + IMS12 OVER TIME
 ############################################################
@@ -1201,7 +1685,6 @@ d$IMS_within_z <- ave(
             sd(x, na.rm = TRUE)
     }
 )
-
 
 ############################################################
 # GROUP MEAN OF WITHIN-SUBJECT Z-SCORES
@@ -1252,7 +1735,6 @@ group_ts$IMS_plot <- ims_scale(
 )
 
 
-
 ############################################################
 # SHARED HLINES BASED ON FULL PLOT RANGE
 ############################################################
@@ -1275,10 +1757,9 @@ hline_100 <- plot_min
 ############################################################
 # PLOT
 ############################################################
-
 ggplot(
     group_ts,
-    aes(x = SessNum)
+    aes(x = SessNum-3)
 ) +
 
     # FC
@@ -1335,12 +1816,12 @@ ggplot(
         name = "FC — within-subject z-score",
         sec.axis = sec_axis(
             ~ ims_inverse(.),
-            name = "IMS12 — within-subject z-score"
+            name = "IMS — within-subject z-score"
         )
     ) +
 
     scale_x_continuous(
-        breaks = sort(unique(group_ts$SessNum))
+        breaks = sort(unique(group_ts$SessNum-3))
     ) +
 
     labs(
@@ -1473,231 +1954,6 @@ ggplot(data=change_scores, aes(x=FC_change, y=MADRS_change, color=group_type)) +
   theme(legend.position='right')
 
 ```
-
-
-```{r Fig6, echo=TRUE, fig.height=15,fig.width=18}
-# MADRS-S with burst
-MADRSInfo=read.csv('E:/Downloads/madrs_data_for_brains/brains_madrs-s.csv')
-# set timepoint equivalence
-tp_map1 <- c(
-  "baseline_visit_2_arm_2"   = "V2",
-  "study_day_1_visit_arm_2"  = "V3",
-  "study_day_2_visit_arm_2"  = "V4",
-  "study_day_3_visit_arm_2"  = "V5",
-  "study_day_4_visit_arm_2"  = "V6",
-  "study_day_5_visit_arm_2"  = "V7",
-  "next_day_visit_vis_arm_2" = "V8",
-  "immediate_post_vis_arm_2" = "V9",
-  "1month_post_visit_arm_2"  = "V10"
-)
-
-# add new sesh column, others become NA
-MADRSInfo$sesh <- tp_map1[MADRSInfo$redcap_event_name]
-
-# make subject names equiv
-MADRSInfo$Subject <- sub(".*_(s[0-9]+[a-z]?)", "\\1", MADRSInfo$record_id)
-# remove trailing a's
-MADRSInfo$Subject <- sub("a$", "", MADRSInfo$Subject)
-
-# ok, now we need a session-wise key instead of subj/session/scan because we dont have a MADRS for each scan
-FCMergedDemo$Key_Sess <- sub("_[0-9]+$", "", FCMergedDemo$key)
-
-# cool, now we need an equivalent key column
-MADRSInfo$Key_Sess <- paste(MADRSInfo$Subject, MADRSInfo$sesh, sep = "_")
-
-# merge em
-FCMergedMADRS=merge(FCMergedDemo,MADRSInfo,by=c("Key_Sess","Subject"))
-FCMergedMADRS=FCMergedMADRS[!is.na(FCMergedMADRS$madrs_s_total),]
-
-
-# calculate change in FC (V8 - V3)
-FCMergedMADRS_change <- FCMergedMADRS[FCMergedMADRS$sesh.x %in% c(3, 8), ]
-FC_change <- FCMergedMADRS_change %>%
-  group_by(Subject, Group, sesh.x) %>%
-  summarise(DM_sgAv_mean = mean(DM_sgAv, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = sesh.x, 
-              values_from = DM_sgAv_mean,
-              names_prefix = "V") %>%
-  mutate(FC_change = V8 - V3) %>%
-  filter(!is.na(FC_change))
-
-# calculate change in MADRS
-
-MADRS_change <- FCMergedMADRS_change %>%
-  group_by(Subject, sesh.x,Group) %>%
-  summarise(MADRS_mean = mean(madrs_s_total, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = sesh.x, 
-              values_from = MADRS_mean,
-              names_prefix = "V") %>%
-  mutate(MADRS_change = V8 - V3) %>%
-  filter(!is.na(MADRS_change))# Remove subjects without both timepoints
-
-# according to protocol, evaluate normality of change in FC and MADRS (shapiro-wilk)
-shapiro.test(MADRS_change$MADRS_change)
-shapiro.test(FC_change$FC_change)
-
-# madrs s meets criteria for non-normality, use spearmans
-change_scores <- merge(MADRS_change, FC_change, by = "Subject")
-# and subset by X and Y
-Xchange=change_scores[change_scores$Group.x=='X',]
-Ychange=change_scores[change_scores$Group.x=='Y',]
-
-XchangeCor=cor.test(Xchange$MADRS_change,Xchange$FC_change,method='spearman')$estimate
-YchangeCor=cor.test(Ychange$MADRS_change,Ychange$FC_change,method='spearman')$estimate
-
-# test MADRS change scores
-library(diffcor)
-diffcor.two(XchangeCor,YchangeCor,16,15)
-
-# plot it - saved at 1500x1200
-change_scores$Treatment=factor(x='Active',levels=c('Active','Sham'))
-change_scores$Treatment[change_scores$Group.x=='Y']='Sham'
-ggplot(data=change_scores,aes(x=FC_change,y=MADRS_change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('MADRS Change \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
-
-
-# Add burst breather flag
-change_scores$burst_breather <- change_scores$Subject %in% BBs$x
-change_scores$Treatment <- factor(ifelse(change_scores$Group.x == 'X', 'Active', 'Sham'), 
-                                  levels = c('Active', 'Sham'))
-
-# Create combined group for coloring
-change_scores$group_type <- factor(
-  paste(change_scores$Treatment, ifelse(change_scores$burst_breather, 'Burst', 'Non-Burst')),
-  levels = c('Active Non-Burst', 'Active Burst', 'Sham Non-Burst', 'Sham Burst')
-)
-
-# Plot
-ggplot(data=change_scores, aes(x=FC_change, y=MADRS_change, color=group_type)) +
-  geom_point(size=6) +
-  geom_smooth(method='lm', se=TRUE, aes(group=Treatment, color=Treatment, fill=Treatment), alpha=0.15) +
-  ylab('MADRS-S Change \n \n') + 
-  xlab('Change in DMN-sgACC FC') +
-  theme_minimal(base_size=46) +
-  scale_color_manual(
-    values=c(
-      'Active Non-Burst' = '#8ac926',
-      'Active Burst' = '#3d6b1f',
-      'Sham Non-Burst' = '#ffca3a',
-      'Sham Burst' = '#cc9900',
-      'Active' = '#8ac926',
-      'Sham' = '#ffca3a'
-    ),
-    breaks=c('Active Non-Burst', 'Active Burst', 'Sham Non-Burst', 'Sham Burst'),
-    name = 'Treatment & Phenotype'
-  ) +
-  scale_fill_manual(
-    values=c(
-      'Active' = '#8ac926',
-      'Sham' = '#ffca3a'
-    ),
-    guide='none'
-  ) +
-  theme(legend.position='right')
-
-
-
-```
-
-
-
-```{r Fig7, echo=TRUE, fig.height=15,fig.width=18}
-# IMS and burst breathing
-IMS=read.csv('E:\\Downloads/Brains_IMS.csv')
-# add new sesh column, others become NA
-IMS$sesh <- tp_map1[IMS$redcap_event_name]
-# make subject names equiv
-IMS$Subject <- sub(".*_(s[0-9]+[a-z]?)", "\\1", IMS$record_id)
-# remove trailing a's
-IMS$Subject <- sub("a$", "", IMS$Subject)
-
-#merge
-IMS$Key_Sess <- paste(IMS$Subject, IMS$sesh, sep = "_")
-FCMergedIMS=merge(FCMergedDemo,IMS,by=c("Key_Sess","Subject"))
-# omit NAs
-FCMergedIMS=FCMergedIMS[!is.na(FCMergedIMS$ims12_totalscore),]
-FCMergedIMS_Change <- FCMergedIMS[FCMergedIMS$sesh.x %in% c(3, 8), ]
-
-# FC Change
-FC_change <- FCMergedIMS_Change %>%
-  group_by(Subject, Group, sesh.x) %>%
-  summarise(DM_sgAv_mean = mean(DM_sgAv, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = sesh.x, 
-              values_from = DM_sgAv_mean,
-              names_prefix = "V") %>%
-  mutate(FC_change = V8 - V3) %>%
-  filter(!is.na(FC_change))
-
-
-
-# calculate change in IMS
-IMS_Change <- FCMergedIMS_Change %>%
-  group_by(Subject, sesh.x, Group) %>%
-  summarise(IMS_mean = mean(ims12_totalscore, na.rm = TRUE), .groups = "drop") %>%
-  pivot_wider(names_from = sesh.x, 
-              values_from = IMS_mean,
-              names_prefix = "V") %>%
-  mutate(IMS_Change = V8 - V3) %>%
-  filter(!is.na(IMS_Change))# Remove subjects without both timepoints
-
-# according to protocol, evaluate normality of change  in IMS (shapiro-wilk)
-shapiro.test(IMS_Change$IMS_Change)
-shapiro.test(FC_change$FC_change)
-
-# IMS meets criteria for non-normality. Proceed with spearmans
-change_scores <- merge(IMS_Change, FC_change, by = "Subject")
-# and subset by X and Y
-Xchange=change_scores[change_scores$Group.x=='X',]
-Ychange=change_scores[change_scores$Group.x=='Y',]
-
-XchangeCor=cor.test(Xchange$IMS_Change,Xchange$FC_change,method='spearman')$estimate
-YchangeCor=cor.test(Ychange$IMS_Change,Ychange$FC_change,method='spearman')$estimate
-# test IMS change scores
-diffcor.two(XchangeCor,YchangeCor,17,17)
-
-# plot it - saved at 1500x1200
-change_scores$Treatment=factor(x='Active',levels=c('Active','Sham'))
-change_scores$Treatment[change_scores$Group.x=='Y']='Sham'
-ggplot(data=change_scores,aes(x=FC_change,y=IMS_Change,color=Treatment))+geom_point()+geom_smooth(method='lm')+ylab('IMS Change \n \n') + xlab('Change in DMN-sgACC FC')+theme_minimal(base_size=46)+scale_color_manual(values=c('#8ac926','#ffca3a'))
-
-
-# Add burst breather flag
-change_scores$burst_breather <- change_scores$Subject %in% BBs$x
-change_scores$Treatment <- factor(ifelse(change_scores$Group.x == 'X', 'Active', 'Sham'), 
-                                  levels = c('Active', 'Sham'))
-
-# Create combined group for coloring
-change_scores$group_type <- factor(
-  paste(change_scores$Treatment, ifelse(change_scores$burst_breather, 'Burst', 'Non-Burst')),
-  levels = c('Active Non-Burst', 'Active Burst', 'Sham Non-Burst', 'Sham Burst')
-)
-
-# Plot
-ggplot(data=change_scores, aes(x=FC_change, y=IMS_Change, color=group_type)) +
-  geom_point(size=6) +
-  geom_smooth(method='lm', se=TRUE, aes(group=Treatment, color=Treatment, fill=Treatment), alpha=0.15) +
-  ylab('IMS Change \n \n') + 
-  xlab('Change in DMN-sgACC FC') +
-  theme_minimal(base_size=46) +
-  scale_color_manual(
-    values=c(
-      'Active Non-Burst' = '#8ac926',
-      'Active Burst' = '#3d6b1f',
-      'Sham Non-Burst' = '#ffca3a',
-      'Sham Burst' = '#cc9900',
-      'Active' = '#8ac926',
-      'Sham' = '#ffca3a'
-    ),
-    breaks=c('Active Non-Burst', 'Active Burst', 'Sham Non-Burst', 'Sham Burst'),
-    name = 'Treatment & Phenotype'
-  ) +
-  scale_fill_manual(
-    values=c(
-      'Active' = '#8ac926',
-      'Sham' = '#ffca3a'
-    ),
-    guide='none'
-  ) +
-  theme(legend.position='right')
 
 
 

@@ -1,4 +1,9 @@
 # large data files -- add/remove based on what's actually in FC/NMF/QC
+*.err
+*func.gii
+*lag*
+*Lag*
+*.out
 *.nii
 *.nii.gz
 *.mat
